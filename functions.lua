@@ -4304,53 +4304,69 @@ F.forceChat = (function()
     local StarterGui = game:GetService("StarterGui")
     local TextChatService = game:GetService("TextChatService")
 
-    local function applyOnce()
+    -- Force the chat window/messages on; the input box (the chatbox you type
+    -- in) follows `showInput`. We keep re-applying because games that hide
+    -- chat usually re-disable it, so just "stopping" lets the game kill it
+    -- again -- which is why turning the toggle off used to nuke all of chat.
+    local function apply(showInput)
         pcall(function()
             StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
         end)
         if TextChatService then
             for _, c in ipairs(TextChatService:GetDescendants()) do
-                if c:IsA("ChatWindowConfiguration")
-                or c:IsA("ChatInputBarConfiguration")
-                or c:IsA("BubbleChatConfiguration") then
+                if c:IsA("ChatInputBarConfiguration") then
+                    pcall(function() c.Enabled = showInput end)
+                elseif c:IsA("ChatWindowConfiguration") or c:IsA("BubbleChatConfiguration") then
                     pcall(function() c.Enabled = true end)
                 end
             end
         end
     end
 
-    -- Only hide the chat INPUT box (the bar you type in); leave the chat
-    -- window/messages and bubbles intact so chat isn't fully disabled.
-    local function disableOnce()
-        if TextChatService then
-            for _, c in ipairs(TextChatService:GetDescendants()) do
-                if c:IsA("ChatInputBarConfiguration") then
-                    pcall(function() c.Enabled = false end)
-                end
+    -- single keep-alive loop driven by G.forceChatMode ("full" | "msgs")
+    local function ensureLoop()
+        if G._forceChatLoop then return end
+        G._forceChatLoop = true
+        task.spawn(function()
+            while G.forceChatMode do
+                apply(G.forceChatMode == "full")
+                task.wait(2)
             end
-        end
+            G._forceChatLoop = false
+        end)
     end
 
     local function start()
         G.forceChatActive = true
-        -- spawn a polling loop that re-applies every 2s. simpler than
-        -- hooking signals on multiple services + the SetCoreGuiEnabled
-        -- side. exits when G.forceChatActive flips false.
-        task.spawn(function()
-            while G.forceChatActive do
-                applyOnce()
-                task.wait(2)
-            end
-        end)
+        G.forceChatMode   = "full"   -- chat window + input box
+        ensureLoop()
+        apply(true)
     end
 
+    -- "off" doesn't kill chat -- it keeps the window/messages and just hides
+    -- the input box, and keeps forcing that so the game can't re-hide it all.
     local function stop()
-        -- flip the flag first so the re-apply loop exits, then turn chat back off
         G.forceChatActive = false
-        disableOnce()
+        G.forceChatMode   = "msgs"   -- messages only, no input box
+        ensureLoop()
+        apply(false)
     end
 
-    return makeToggle(start, stop, "forceChatActive")
+    local toggle = makeToggle(start, stop, "forceChatActive")
+    -- used by unload: stop forcing entirely and restore the input box so chat
+    -- is fully usable again after the script is removed
+    toggle.fullStop = function()
+        G.forceChatActive = false
+        G.forceChatMode   = nil      -- loop exits
+        if TextChatService then
+            for _, c in ipairs(TextChatService:GetDescendants()) do
+                if c:IsA("ChatInputBarConfiguration") then
+                    pcall(function() c.Enabled = true end)
+                end
+            end
+        end
+    end
+    return toggle
 end)()
 
 -- ============================================================
@@ -13004,7 +13020,7 @@ F.disableAll = function()
         if F.prompts.throughWalls      then F.prompts.throughWalls.stop()      end
         if F.prompts.autoFire          then F.prompts.autoFire.stop()          end
     end
-    if F.forceChat and F.forceChat.stop then F.forceChat.stop() end
+    if F.forceChat then (F.forceChat.fullStop or F.forceChat.stop)() end
     stopNoclip(); stopFullbright(); stopFreecam()
     stopZoom(); stopSpin(); stopFlip(); stopTilt(); stopBackwards(); stopIce()
     if F.stickyEmote then F.stickyEmote.stop() end
