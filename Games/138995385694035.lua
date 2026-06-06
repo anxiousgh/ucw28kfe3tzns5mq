@@ -26,6 +26,7 @@ end
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local UserInputService  = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer       = Players.LocalPlayer
 
 -- decay's knock check: workspace.Players.Characters[name].BodyEffects["K.O"]
@@ -243,8 +244,52 @@ local function gotoTarget()
     pcall(function() hook.players["goto"](tgt) end)
 end
 
+-- Bring: TP-shoot, then TP on top of the target, fire the grab remote
+-- (MainEvent "Grabbing"), and once our BodyEffects.Grabbed flips, TP back.
+-- Pauses auto-stomp while grabbing and resumes it after.
+local function bring()
+    local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
+    local lc   = LocalPlayer.Character
+    local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+    if not lhrp then return end
+    task.spawn(function()
+        local saved = lhrp.CFrame
+        local thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+        if not thrp then return end
+        -- TP-shoot
+        local wasFH = hc.forceHit.isActive()
+        hc.forceHit.setTarget(tgt)
+        if not wasFH then hc.forceHit.start() end
+        lhrp.CFrame = thrp.CFrame * CFrame.new(0, 0, 4)
+        task.wait(0.12)
+        pcall(hc.forceHit.fire)
+        if not wasFH then hc.forceHit.stop() end
+        -- pause auto-stomp before stacking on top
+        local stompWasOn = hc.autoStomp.isActive()
+        if stompWasOn then hc.autoStomp.stop() end
+        -- TP right on top + grab
+        thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+        if thrp then lhrp.CFrame = thrp.CFrame end
+        task.wait(0.05)
+        local fx       = lc:FindFirstChild("BodyEffects")
+        local grab     = fx and fx:FindFirstChild("Grabbed")
+        local startVal = grab and grab.Value
+        pcall(function() ReplicatedStorage.MainEvent:FireServer("Grabbing") end)
+        -- wait until we've actually grabbed (Grabbed value changes), with timeout
+        local t0 = os.clock()
+        repeat
+            task.wait()
+            grab = fx and fx:FindFirstChild("Grabbed")
+        until (grab and grab.Value ~= startVal) or (os.clock() - t0 > 3) or not lhrp.Parent
+        -- TP back + resume auto-stomp
+        if lhrp and lhrp.Parent then lhrp.CFrame = saved end
+        if stompWasOn then hc.autoStomp.start() end
+    end)
+end
+
 Target:NewButton("TP shoot", tpShoot)
     :AddButton("Goto", gotoTarget)
+Target:NewButton("Bring", bring)
 
 -- Visualization: ragebot target line + outline for the locked target
 Target:NewSection("Visualization")
