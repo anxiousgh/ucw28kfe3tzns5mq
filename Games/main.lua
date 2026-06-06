@@ -36,7 +36,6 @@ local ROOT      = "witherhook"
 local CFG_ROOT  = ROOT .. "/configs"
 local UNI_DIR   = CFG_ROOT .. "/universal"
 local placeId   = tostring(ctx.gameKey or "0")
-local GAME_DIR  = CFG_ROOT .. "/games/" .. placeId
 local SETTINGS_PATH = ROOT .. "/settings.json"
 local AUTOLOAD_PATH = ROOT .. "/autoload.json"
 
@@ -50,6 +49,12 @@ local GAMES = {
     ["9825515356"]      = "Hood Customs",
 }
 local supportedName = GAMES[placeId]   -- nil => unsupported => universal configs
+
+-- Supported games share their config folder by NAME, so e.g. Hood Customs'
+-- two PlaceIds use the SAME configs. (Unsupported games use universal, not
+-- GAME_DIR.)
+local cfgKey   = supportedName and supportedName:gsub("[^%w]+", "_") or placeId
+local GAME_DIR = CFG_ROOT .. "/games/" .. cfgKey
 
 local function ensureFolder(path)
     if typeof(makefolder) == "function" and typeof(isfolder) == "function" then
@@ -539,9 +544,9 @@ local CFG_DIR, sectionTitle, getAuto, setAuto, clearAuto
 if supportedName then
     CFG_DIR      = GAME_DIR
     sectionTitle = supportedName .. " — Configs"
-    getAuto      = function() return autoload.games[placeId] end
-    setAuto      = function(n) autoload.games[placeId] = n end
-    clearAuto    = function() autoload.games[placeId] = false end
+    getAuto      = function() return autoload.games[cfgKey] end
+    setAuto      = function(n) autoload.games[cfgKey] = n end
+    clearAuto    = function() autoload.games[cfgKey] = false end
 else
     CFG_DIR      = UNI_DIR
     sectionTitle = "Universal Configs (unsupported game)"
