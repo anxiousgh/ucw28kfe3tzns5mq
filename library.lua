@@ -773,7 +773,7 @@ function library:Introduction()
     xsx.BackgroundTransparency = 1.000
     xsx.Size = UDim2.new(0, 80, 0, 21)
     xsx.Font = Enum.Font.Code
-    xsx.Text = "powered by xsx"
+    xsx.Text = ""
     xsx.TextColor3 = Color3.fromRGB(124, 124, 124)
     xsx.TextSize = 10.000
     xsx.TextTransparency = 1
@@ -785,7 +785,7 @@ function library:Introduction()
     text.Position = UDim2.new(0.912751675, 0, 0, 0)
     text.Size = UDim2.new(0, 26, 0, 21)
     text.Font = Enum.Font.Code
-    text.Text = "hash"
+    text.Text = ""
     text.TextColor3 = Color3.fromRGB(124, 124, 124)
     text.TextSize = 10.000
     text.TextTransparency = 1
@@ -3174,6 +3174,335 @@ function library:Init(key)
                 return SelectorFunctions
             end
             return SelectorFunctions
+        end
+        --
+        -- Collapsible dropdown. Unlike NewSelector (always-expanded list),
+        -- this collapses to the current value and opens on click.
+        --   multi = true  -> multi-select, callback gets an array of strings
+        --   multi = false -> single-select, callback gets the chosen string
+        function Components:NewDropdown(text, default, list, multi, callback)
+            text     = text or "dropdown"
+            list     = list or {}
+            multi    = multi or false
+            callback = callback or function() end
+
+            CreateTween("dropdown", 0.12)
+
+            local COLLAPSED_H = 46
+            local OPTION_H    = 20
+            local GREY        = Color3.fromRGB(160, 160, 160)
+            local PURPLE      = Color3.fromRGB(159, 115, 255)
+            local placeholder = ". . ."
+
+            -- single: selected string | nil   multi: set { [opt]=true }
+            local selectedSet = {}
+            local single
+            local expanded = false
+
+            local dropdownFrame = Instance.new("Frame")
+            local dropdownLayout = Instance.new("UIListLayout")
+            local dropdownLabel = Instance.new("TextLabel")
+            local dropdownLabelPadding = Instance.new("UIPadding")
+            local header = Instance.new("TextButton")
+            local headerCorner = Instance.new("UICorner")
+            local headerPadding = Instance.new("UIPadding")
+            local headerInner = Instance.new("Frame")
+            local headerInnerCorner = Instance.new("UICorner")
+            local headerInnerGradient = Instance.new("UIGradient")
+            local valueText = Instance.new("TextLabel")
+            local valuePadding = Instance.new("UIPadding")
+            local arrow = Instance.new("TextLabel")
+            local optionsHolder = Instance.new("Frame")
+            local optionsLayout = Instance.new("UIListLayout")
+
+            dropdownFrame.Name = "dropdownFrame"
+            dropdownFrame.Parent = page
+            dropdownFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            dropdownFrame.BackgroundTransparency = 1.000
+            dropdownFrame.ClipsDescendants = true
+            dropdownFrame.Position = UDim2.new(0.00499999989, 0, 0.0895953774, 0)
+            dropdownFrame.Size = UDim2.new(0, 396, 0, COLLAPSED_H)
+
+            dropdownLayout.Name = "dropdownLayout"
+            dropdownLayout.Parent = dropdownFrame
+            dropdownLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+            dropdownLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+            dropdownLabel.Name = "dropdownLabel"
+            dropdownLabel.Parent = dropdownFrame
+            dropdownLabel.LayoutOrder = 1
+            dropdownLabel.BackgroundTransparency = 1.000
+            dropdownLabel.Size = UDim2.new(0, 396, 0, 24)
+            dropdownLabel.Font = Enum.Font.Code
+            dropdownLabel.Text = text
+            dropdownLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
+            dropdownLabel.TextSize = 14.000
+            dropdownLabel.TextWrapped = true
+            dropdownLabel.TextXAlignment = Enum.TextXAlignment.Left
+            dropdownLabel.RichText = true
+
+            dropdownLabelPadding.Parent = dropdownLabel
+            dropdownLabelPadding.PaddingBottom = UDim.new(0, 6)
+            dropdownLabelPadding.PaddingLeft = UDim.new(0, 2)
+            dropdownLabelPadding.PaddingRight = UDim.new(0, 6)
+            dropdownLabelPadding.PaddingTop = UDim.new(0, 6)
+
+            header.Name = "header"
+            header.Parent = dropdownFrame
+            header.LayoutOrder = 2
+            header.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            header.ClipsDescendants = true
+            header.Size = UDim2.new(0, 396, 0, 21)
+            header.AutoButtonColor = false
+            header.Font = Enum.Font.SourceSans
+            header.Text = ""
+            header.TextSize = 14.000
+
+            headerCorner.CornerRadius = UDim.new(0, 2)
+            headerCorner.Parent = header
+
+            headerPadding.Parent = header
+            headerPadding.PaddingTop = UDim.new(0, 1)
+
+            headerInner.Name = "headerInner"
+            headerInner.Parent = header
+            headerInner.ClipsDescendants = true
+            headerInner.Position = UDim2.new(0.00252525252, 0, 0, 0)
+            headerInner.Size = UDim2.new(0, 394, 0, 20)
+
+            headerInnerCorner.CornerRadius = UDim.new(0, 2)
+            headerInnerCorner.Parent = headerInner
+
+            headerInnerGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(34, 34, 34)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(28, 28, 28))}
+            headerInnerGradient.Rotation = 90
+            headerInnerGradient.Parent = headerInner
+
+            valueText.Name = "valueText"
+            valueText.Parent = headerInner
+            valueText.BackgroundTransparency = 1.000
+            valueText.Size = UDim2.new(0, 372, 0, 20)
+            valueText.Font = Enum.Font.Code
+            valueText.LineHeight = 1.150
+            valueText.TextColor3 = GREY
+            valueText.TextSize = 14.000
+            valueText.TextXAlignment = Enum.TextXAlignment.Left
+            valueText.TextTruncate = Enum.TextTruncate.AtEnd
+            valueText.Text = default or placeholder
+
+            valuePadding.Parent = valueText
+            valuePadding.PaddingBottom = UDim.new(0, 6)
+            valuePadding.PaddingLeft = UDim.new(0, 6)
+            valuePadding.PaddingRight = UDim.new(0, 6)
+            valuePadding.PaddingTop = UDim.new(0, 6)
+
+            arrow.Name = "arrow"
+            arrow.Parent = headerInner
+            arrow.AnchorPoint = Vector2.new(1, 0.5)
+            arrow.BackgroundTransparency = 1.000
+            arrow.Position = UDim2.new(1, -6, 0.5, 0)
+            arrow.Size = UDim2.new(0, 14, 0, 20)
+            arrow.Font = Enum.Font.Code
+            arrow.Text = "+"
+            arrow.TextColor3 = GREY
+            arrow.TextSize = 14.000
+
+            optionsHolder.Name = "optionsHolder"
+            optionsHolder.Parent = dropdownFrame
+            optionsHolder.LayoutOrder = 3
+            optionsHolder.BackgroundTransparency = 1.000
+            optionsHolder.ClipsDescendants = true
+            optionsHolder.Size = UDim2.new(0, 394, 0, 0)
+
+            optionsLayout.Name = "optionsLayout"
+            optionsLayout.Parent = optionsHolder
+            optionsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+            optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+            local function countOptions()
+                local c = 0
+                for _, x in ipairs(optionsHolder:GetChildren()) do
+                    if x:IsA("TextButton") then c = c + 1 end
+                end
+                return c
+            end
+
+            -- refresh the header text + per-option highlight colours
+            local function refreshDisplay()
+                if multi then
+                    local picked = {}
+                    for _, x in ipairs(optionsHolder:GetChildren()) do
+                        if x:IsA("TextButton") then
+                            local on = selectedSet[x.Text] == true
+                            TweenService:Create(x, TweenTable["dropdown"], {TextColor3 = on and PURPLE or GREY}):Play()
+                            if on then table.insert(picked, x.Text) end
+                        end
+                    end
+                    valueText.Text = (#picked > 0) and table.concat(picked, ", ") or placeholder
+                else
+                    for _, x in ipairs(optionsHolder:GetChildren()) do
+                        if x:IsA("TextButton") then
+                            TweenService:Create(x, TweenTable["dropdown"], {TextColor3 = (x.Text == single) and PURPLE or GREY}):Play()
+                        end
+                    end
+                    valueText.Text = single or placeholder
+                end
+            end
+
+            local function resize()
+                local n = countOptions()
+                if expanded then
+                    TweenService:Create(optionsHolder, TweenTable["dropdown"], {Size = UDim2.new(0, 394, 0, n * OPTION_H)}):Play()
+                    TweenService:Create(dropdownFrame, TweenTable["dropdown"], {Size = UDim2.new(0, 396, 0, COLLAPSED_H + n * OPTION_H)}):Play()
+                else
+                    TweenService:Create(optionsHolder, TweenTable["dropdown"], {Size = UDim2.new(0, 394, 0, 0)}):Play()
+                    TweenService:Create(dropdownFrame, TweenTable["dropdown"], {Size = UDim2.new(0, 396, 0, COLLAPSED_H)}):Play()
+                end
+                arrow.Text = expanded and "-" or "+"
+                UpdatePageSize()
+                task.delay(0.14, UpdatePageSize)
+            end
+
+            local function currentValue()
+                if multi then
+                    local picked = {}
+                    for opt, on in pairs(selectedSet) do
+                        if on then table.insert(picked, opt) end
+                    end
+                    return picked
+                end
+                return single
+            end
+
+            local function makeOption(optText)
+                local optionButton = Instance.new("TextButton")
+                optionButton.Name = "optionButton"
+                optionButton.Parent = optionsHolder
+                optionButton.BackgroundTransparency = 1.000
+                optionButton.Size = UDim2.new(0, 394, 0, OPTION_H)
+                optionButton.AutoButtonColor = false
+                optionButton.Font = Enum.Font.Code
+                optionButton.Text = optText
+                optionButton.TextColor3 = GREY
+                optionButton.TextSize = 14.000
+
+                optionButton.MouseButton1Click:Connect(function()
+                    if multi then
+                        selectedSet[optText] = not selectedSet[optText]
+                        refreshDisplay()
+                        callback(currentValue())
+                    else
+                        single = optText
+                        refreshDisplay()
+                        callback(single)
+                        expanded = false
+                        resize()
+                    end
+                end)
+                return optionButton
+            end
+
+            for _, v in ipairs(list) do
+                makeOption(v)
+            end
+
+            -- apply default(s)
+            if default then
+                if multi then
+                    selectedSet[default] = true
+                else
+                    single = default
+                end
+            end
+            refreshDisplay()
+            UpdatePageSize()
+
+            header.MouseButton1Click:Connect(function()
+                expanded = not expanded
+                resize()
+            end)
+
+            local DropdownFunctions = {}
+
+            function DropdownFunctions:AddOption(new)
+                new = new or "option"
+                makeOption(new)
+                if expanded then resize() end
+                UpdatePageSize()
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:RemoveOption(option)
+                for _, x in ipairs(optionsHolder:GetChildren()) do
+                    if x:IsA("TextButton") and x.Text == option then
+                        x:Destroy()
+                    end
+                end
+                selectedSet[option] = nil
+                if single == option then single = nil end
+                refreshDisplay()
+                resize()
+                return DropdownFunctions
+            end
+
+            -- single: pass a string. multi: pass a string (toggles on) or an array.
+            function DropdownFunctions:Set(value)
+                if multi then
+                    if type(value) == "table" then
+                        selectedSet = {}
+                        for _, v in ipairs(value) do selectedSet[v] = true end
+                    elseif value ~= nil then
+                        selectedSet[value] = true
+                    end
+                else
+                    single = value
+                end
+                refreshDisplay()
+                callback(currentValue())
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:GetValue()
+                return currentValue()
+            end
+
+            function DropdownFunctions:SetFunction(new)
+                callback = new or callback
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:Text(new)
+                dropdownLabel.Text = new or dropdownLabel.Text
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:Open()
+                expanded = true
+                resize()
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:Close()
+                expanded = false
+                resize()
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:Hide()
+                dropdownFrame.Visible = false
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:Show()
+                dropdownFrame.Visible = true
+                return DropdownFunctions
+            end
+
+            function DropdownFunctions:Remove()
+                dropdownFrame:Destroy()
+                return DropdownFunctions
+            end
+
+            return DropdownFunctions
         end
         --
         function Components:NewSlider(text, suffix, compare, compareSign, values, callback)
