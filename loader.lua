@@ -134,11 +134,30 @@ local function tryGameModule(key)
     return true
 end
 
-if not tryGameModule(gameKey) then
+-- Optional override: set getgenv().LOAD_UNIVERSAL = "true" in your loadstring
+-- to force the universal shell even on a supported game.
+local function isTruthy(v)
+    if v == true then return true end
+    if type(v) == "string" then
+        local s = v:lower()
+        return s == "true" or s == "1" or s == "yes" or s == "on"
+    end
+    return false
+end
+local forceUniversal = false
+pcall(function() forceUniversal = isTruthy(getgenv and getgenv().LOAD_UNIVERSAL) end)
+
+local loadedGameModule = (not forceUniversal) and tryGameModule(gameKey)
+
+if not loadedGameModule then
     -- default shell -- surfaced loudly if it ever breaks, instead of an empty UI
     local okU, errU = pcall(function() load("Games/universal.lua")(ctx) end)
     if okU then
-        print("[witherhook] loaded universal shell (no module for placeId " .. gameKey .. ")")
+        if forceUniversal then
+            print("[witherhook] LOAD_UNIVERSAL set - forced universal shell")
+        else
+            print("[witherhook] loaded universal shell (no module for placeId " .. gameKey .. ")")
+        end
     else
         warn("[witherhook] universal shell failed: " .. tostring(errU))
         Notif:Notify("witherhook: UI failed to load (see console)", 6, "error")
