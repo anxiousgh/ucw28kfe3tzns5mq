@@ -221,9 +221,26 @@ local function activeTarget() return bestTarget(false, false, nil) end
 -- grabbed by someone), so TP shoot / Bring don't pick a downed/carried player
 local function activeTargetAlive() return bestTarget(true, false, nil) end
 
--- upright teleport (won't fall over onto knocked players) + desync-aware
+-- upright teleport (won't fall over onto knocked players) + desync-aware.
+-- This clears ragdoll/sit and notifies desync -- relatively heavy, so use it
+-- ONCE per teleport, never in a per-frame loop.
 local uprightTp = hook.uprightTp or function(_, h, pos, face)
     if h then h.CFrame = CFrame.new(pos, pos + Vector3.new((face and face.X) or 0, 0, (face and face.Z) or -1)) end
+end
+
+-- lightweight upright snap for tight per-frame loops: sets an upright CFrame
+-- and zeroes velocity only. Running the full uprightTp (humanoid-state spam +
+-- WaitForChild + task.delay + desync-notify) every frame was freezing Bring.
+local function snapUprightTo(h, pos, face)
+    if not h then return end
+    local horiz = face and Vector3.new(face.X, 0, face.Z)
+        or Vector3.new(h.CFrame.LookVector.X, 0, h.CFrame.LookVector.Z)
+    if horiz.Magnitude < 0.01 then horiz = Vector3.new(0, 0, -1) end
+    pcall(function()
+        h.CFrame = CFrame.new(pos, pos + horiz.Unit)
+        h.AssemblyLinearVelocity  = Vector3.zero
+        h.AssemblyAngularVelocity = Vector3.zero
+    end)
 end
 
 -- the six guns; TP shoot / Bring abort if we hold none of them
@@ -323,17 +340,25 @@ local function bring()
         local grab     = fx and fx:FindFirstChild("Grabbed")
         local startVal = grab and grab.Value
 
+        -- per-frame snap onto the target's torso top (lightweight)
         local function onTopOfTarget()
             local part = torsoOf(tgt.Character)
             if part and lhrp and lhrp.Parent then
                 local pos = part.Position + Vector3.new(0, (part.Size.Y / 2) + 3, 0)
-                uprightTp(lc, lhrp, pos, lhrp.CFrame.LookVector)
+                snapUprightTo(lhrp, pos, lhrp.CFrame.LookVector)
             end
         end
 
         -- pause auto-stomp for the whole sequence so we don't finish them off
         local stompWasOn = hc.autoStomp.isActive()
         if stompWasOn then hc.autoStomp.stop() end
+
+        -- one heavy upright fix up front (clears ragdoll/sit, syncs desync);
+        -- the per-frame loops below use the lightweight snap instead
+        do
+            local part = torsoOf(tgt.Character)
+            if part then uprightTp(lc, lhrp, part.Position + Vector3.new(0, (part.Size.Y / 2) + 3, 0), nil) end
+        end
 
         -- 1) You can only grab a KNOCKED player. Stand on them and shoot ASAP
         --    (every frame, like TP shoot) until they're K.O -- but don't fire
