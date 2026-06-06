@@ -290,6 +290,38 @@ regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000,
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
 -- ============================================================
+--  PLAYERS
+-- ============================================================
+local PlayersTab = Window:NewTab("Players")
+PlayersTab:NewSection("Players")
+
+local LocalPlr = game:GetService("Players").LocalPlayer
+local function playerNameList()
+    local names = {}
+    for _, p in ipairs(hook.players.list()) do
+        if p ~= LocalPlr then names[#names + 1] = p.Name end
+    end
+    if #names == 0 then names = { "(none)" } end
+    return names
+end
+local plrSel = nil
+local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v) plrSel = v end)
+PlayersTab:NewButton("Refresh players", function() plrDrop:SetOptions(playerNameList()) end)
+
+local function selectedPlayer()
+    if not plrSel or plrSel == "(none)" then notify("Select a player first", 2, "alert"); return nil end
+    local p = hook.players.find(plrSel)
+    if not p then notify("Player not found: " .. tostring(plrSel), 2, "error") end
+    return p
+end
+
+PlayersTab:NewButton("Follow", function() local p = selectedPlayer(); if p then hook.players.follow(p) end end)
+    :AddButton("Unfollow", function() hook.players.followStop() end)
+PlayersTab:NewButton("View", function() local p = selectedPlayer(); if p then hook.players.view(p) end end)
+    :AddButton("Goto", function() local p = selectedPlayer(); if p then hook.players["goto"](p) end end)
+PlayersTab:NewButton("Fling", function() local p = selectedPlayer(); if p then hook.players.fling(p) end end)
+
+-- ============================================================
 --  VISUALS
 -- ============================================================
 local Visuals = Window:NewTab("Visuals")

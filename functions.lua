@@ -5073,6 +5073,7 @@ F.games.hoodCustoms.autoStomp = (function()
                         end
                     end
                 end
+                return  -- targets-only: never fall through to stomp non-targets
             end
             if not someoneBelow() then return end
             last = tick()
