@@ -335,17 +335,21 @@ local function bring()
         local stompWasOn = hc.autoStomp.isActive()
         if stompWasOn then hc.autoStomp.stop() end
 
-        -- 1) You can only grab a KNOCKED player. Stand on them and force-hit
-        --    until they're K.O (skip if already knocked).
+        -- 1) You can only grab a KNOCKED player. Stand on them and shoot ASAP
+        --    (every frame, like TP shoot) until they're K.O -- but don't fire
+        --    while they're spawn-protected or not loaded in. Skip if already
+        --    knocked.
         local wasFH = hc.forceHit.isActive()
         if not wasFH then hc.forceHit.start() end
         local kt0 = os.clock()
         while not isKnocked(tgt) do
             if not (tgt.Character and tgt.Character.Parent) or not lhrp.Parent then break end
             onTopOfTarget()
-            hc.forceHit.setTarget(tgt)
-            pcall(hc.forceHit.fire)
-            task.wait(0.08)
+            if canEngage(tgt) then
+                hc.forceHit.setTarget(tgt)
+                pcall(hc.forceHit.fire)
+            end
+            task.wait()
             if os.clock() - kt0 > 4 then break end
         end
         if not wasFH then hc.forceHit.stop() end
