@@ -291,18 +291,25 @@ local function bring()
         -- pause auto-stomp before stacking on top
         local stompWasOn = hc.autoStomp.isActive()
         if stompWasOn then hc.autoStomp.stop() end
-        -- fire grab once, then keep teleporting onto them every frame until our
+        -- TP upright ONTO the top of their torso (not inside it), THEN fire the
+        -- grab once, and keep re-teleporting on top every frame until our
         -- Grabbed value changes (or timeout) so we stay glued on top
         local fx       = lc:FindFirstChild("BodyEffects")
         local grab     = fx and fx:FindFirstChild("Grabbed")
         local startVal = grab and grab.Value
+        local function onTopOfTarget()
+            local part = torsoOf(tgt.Character)
+            if part and lhrp and lhrp.Parent then
+                local pos = part.Position + Vector3.new(0, (part.Size.Y / 2) + 3, 0)
+                uprightTp(lc, lhrp, pos, lhrp.CFrame.LookVector)
+            end
+        end
+        onTopOfTarget()
+        task.wait()   -- let the teleport land before the server registers the grab
         pcall(function() ReplicatedStorage.MainEvent:FireServer("Grabbing") end)
         local t0 = os.clock()
         repeat
-            local part = torsoOf(tgt.Character)
-            if part and lhrp and lhrp.Parent then
-                uprightTp(lc, lhrp, part.Position, lhrp.CFrame.LookVector)
-            end
+            onTopOfTarget()
             task.wait()
             grab = fx and fx:FindFirstChild("Grabbed")
         until (grab and grab.Value ~= startVal) or (os.clock() - t0 > 5) or not lhrp.Parent
