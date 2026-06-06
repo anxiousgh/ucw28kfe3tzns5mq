@@ -1098,42 +1098,21 @@ function library:Init(key)
     drag(edge, 0.04)
     local CanChangeVisibility = true
 
-    -- Toggle the window with a fade instead of an instant show/hide.
-    -- Captures each element's current transparency into an attribute on
-    -- hide and tweens everything to 1, then back on show (covers tabs/
-    -- components added after Init too, since it walks the live tree).
-    local FADE_PROPS = { "BackgroundTransparency", "TextTransparency", "ImageTransparency" }
-    local FADE_INFO  = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    -- The window content lives in a CanvasGroup (set up just below), so the
+    -- show/hide hotkey fades EVERYTHING with a single GroupTransparency
+    -- tween -- no per-element walk, so no frame hitch / freeze.
+    local contentGroup
     local windowHidden = false
-    local fadeToken = 0
+    local FADE_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     local function fadeWindow(hide)
-        fadeToken = fadeToken + 1
-        local myToken = fadeToken
-        local function eachInst(fn)
-            fn(edge)
-            for _, d in ipairs(edge:GetDescendants()) do fn(d) end
+        local target = hide and 1 or 0
+        if not hide then edge.Visible = true end
+        if contentGroup then
+            TweenService:Create(contentGroup, FADE_INFO, { GroupTransparency = target }):Play()
         end
+        TweenService:Create(edge, FADE_INFO, { BackgroundTransparency = target }):Play()
         if hide then
-            eachInst(function(d)
-                for _, p in ipairs(FADE_PROPS) do
-                    local ok, val = pcall(function() return d[p] end)
-                    if ok and type(val) == "number" and val < 1 then
-                        d:SetAttribute("_whFade_" .. p, val)
-                        TweenService:Create(d, FADE_INFO, { [p] = 1 }):Play()
-                    end
-                end
-            end)
-            task.delay(0.22, function() if myToken == fadeToken then edge.Visible = false end end)
-        else
-            edge.Visible = true
-            eachInst(function(d)
-                for _, p in ipairs(FADE_PROPS) do
-                    local base = d:GetAttribute("_whFade_" .. p)
-                    if base ~= nil then
-                        TweenService:Create(d, FADE_INFO, { [p] = base }):Play()
-                    end
-                end
-            end)
+            task.delay(0.21, function() if windowHidden then edge.Visible = false end end)
         end
     end
 
@@ -1149,8 +1128,20 @@ function library:Init(key)
     edgeCorner.Name = "edgeCorner"
     edgeCorner.Parent = edge
 
+    contentGroup = Instance.new("CanvasGroup")
+    contentGroup.Name = "contentGroup"
+    contentGroup.AnchorPoint = Vector2.new(0.5, 0.5)
+    contentGroup.Position = UDim2.new(0.5, 0, 0.5, 0)
+    contentGroup.Size = UDim2.new(1, 0, 1, 0)
+    contentGroup.BackgroundTransparency = 1
+    contentGroup.BorderSizePixel = 0
+    contentGroup.Parent = edge
+    local contentGroupCorner = Instance.new("UICorner")
+    contentGroupCorner.CornerRadius = UDim.new(0, 2)
+    contentGroupCorner.Parent = contentGroup
+
     background.Name = "background"
-    background.Parent = edge
+    background.Parent = contentGroup
     background.AnchorPoint = Vector2.new(0.5, 0.5)
     background.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     background.Position = UDim2.new(0.5, 0, 0.5, 0)

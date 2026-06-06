@@ -3243,6 +3243,15 @@ F.toolMaterial = (function()
         d.Transparency = 1
     end
 
+    -- SurfaceAppearance (PBR) sits on a MeshPart and OVERRIDES .Material,
+    -- so the forced Neon/ForceField won't show until it's removed. Detach
+    -- it (remembering its parent) and re-attach on restore.
+    local function stripSurface(sa)
+        if snap[sa] then return end
+        snap[sa] = { kind = "surface", parent = sa.Parent }
+        sa.Parent = nil
+    end
+
     local function walkTool(tool)
         if not tool then return end
         for _, inst in ipairs(tool:GetDescendants()) do
@@ -3252,14 +3261,19 @@ F.toolMaterial = (function()
                 stripMesh(inst)
             elseif inst:IsA("Texture") or inst:IsA("Decal") then
                 hideDeco(inst)
+            elseif inst:IsA("SurfaceAppearance") then
+                stripSurface(inst)
             end
         end
     end
 
     local function restoreAll()
         for inst, s in pairs(snap) do
-            if inst and inst.Parent then
-                pcall(function()
+            pcall(function()
+                if s.kind == "surface" then
+                    -- re-attach even though we detached it (Parent is nil)
+                    if inst and s.parent and s.parent.Parent then inst.Parent = s.parent end
+                elseif inst and inst.Parent then
                     if s.kind == "part" then
                         inst.Material      = s.mat
                         inst.Color         = s.color
@@ -3273,8 +3287,8 @@ F.toolMaterial = (function()
                     elseif s.kind == "deco" then
                         inst.Transparency = s.transparency
                     end
-                end)
-            end
+                end
+            end)
             snap[inst] = nil
         end
     end
@@ -3299,6 +3313,8 @@ F.toolMaterial = (function()
                         inst.VertexColor = Vector3.new(1, 1, 1)
                     elseif s.kind == "deco" then
                         inst.Transparency = 1
+                    elseif s.kind == "surface" then
+                        inst.Parent = nil
                     end
                 end)
             end
@@ -3316,6 +3332,7 @@ F.toolMaterial = (function()
             if inst:IsA("BasePart") then recolourPart(inst)
             elseif inst:IsA("SpecialMesh") then stripMesh(inst)
             elseif inst:IsA("Texture") or inst:IsA("Decal") then hideDeco(inst)
+            elseif inst:IsA("SurfaceAppearance") then stripSurface(inst)
             end
         end)
     end
@@ -3514,8 +3531,11 @@ F.bodyMaterial = (function()
 
     local function restoreAll()
         for inst, s in pairs(snap) do
-            if inst and inst.Parent then
-                pcall(function()
+            pcall(function()
+                if s.kind == "surface" then
+                    -- re-attach even though we detached it (Parent is nil)
+                    if inst and s.parent and s.parent.Parent then inst.Parent = s.parent end
+                elseif inst and inst.Parent then
                     if s.kind == "part" then
                         inst.Material      = s.mat
                         inst.Color         = s.color
@@ -3529,8 +3549,8 @@ F.bodyMaterial = (function()
                     elseif s.kind == "deco" then
                         inst.Transparency = s.transparency
                     end
-                end)
-            end
+                end
+            end)
             snap[inst] = nil
         end
     end
@@ -3555,6 +3575,8 @@ F.bodyMaterial = (function()
                         inst.VertexColor = Vector3.new(1, 1, 1)
                     elseif s.kind == "deco" then
                         inst.Transparency = 1
+                    elseif s.kind == "surface" then
+                        inst.Parent = nil
                     end
                 end)
             end
