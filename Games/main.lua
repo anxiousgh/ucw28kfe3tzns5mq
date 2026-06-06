@@ -308,6 +308,15 @@ local plrSel = nil
 local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v) plrSel = v end)
 PlayersTab:NewButton("Refresh players", function() plrDrop:SetOptions(playerNameList()) end)
 
+-- auto-refresh the list when players join/leave
+local Players = game:GetService("Players")
+local function refreshPlayerList()
+    if library.Unloaded then return end
+    plrDrop:SetOptions(playerNameList())
+end
+Players.PlayerAdded:Connect(refreshPlayerList)
+Players.PlayerRemoving:Connect(function() task.defer(refreshPlayerList) end)
+
 local function selectedPlayer()
     if not plrSel or plrSel == "(none)" then notify("Select a player first", 2, "alert"); return nil end
     local p = hook.players.find(plrSel)
