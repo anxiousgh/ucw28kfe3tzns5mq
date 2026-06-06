@@ -217,6 +217,9 @@ end)
 -- ---------- Target actions (operate on the active locked target) ----------
 Target:NewSection("Target actions")
 local function activeTarget() return bestTarget(false, false, nil) end
+-- like activeTarget but skips knocked players (isKnocked also counts being
+-- grabbed by someone), so TP shoot / Bring don't pick a downed/carried player
+local function activeTargetAlive() return bestTarget(true, false, nil) end
 
 -- upright teleport (won't fall over onto knocked players) + desync-aware
 local uprightTp = hook.uprightTp or function(_, h, pos, face)
@@ -277,7 +280,7 @@ end
 -- TP shoot: equip DB -> save spot -> TP to target (upright) -> force-hit -> TP back ~1s
 local function tpShoot()
     if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
-    local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
+    local tgt = activeTargetAlive(); if not tgt then notify("No target", 2, "alert"); return end
     if inForceField(tgt) then notify("Target in forcefield", 2, "alert"); return end
     if not appearanceLoaded(tgt) then notify("Target not loaded", 2, "alert"); return end
     local lc   = LocalPlayer.Character
@@ -307,7 +310,7 @@ end
 -- BodyEffects.Grabbed value changes; resume auto-stomp.
 local function bring()
     if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
-    local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
+    local tgt = activeTargetAlive(); if not tgt then notify("No target", 2, "alert"); return end
     if inForceField(tgt) then notify("Target in forcefield", 2, "alert"); return end
     if not appearanceLoaded(tgt) then notify("Target not loaded", 2, "alert"); return end
     local lc   = LocalPlayer.Character
