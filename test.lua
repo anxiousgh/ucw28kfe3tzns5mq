@@ -5,7 +5,16 @@
 --    loadstring(game:HttpGet("https://raw.githubusercontent.com/anxiousgh/ucw28kfe3tzns5mq/main/test.lua"))()
 -- ============================================================
 
-local BASE = "https://raw.githubusercontent.com/anxiousgh/ucw28kfe3tzns5mq/main/"
+-- SHA-pin so the executor/CDN cache can't hand us a stale library.lua.
+local OWNER, REPO, BRANCH = "anxiousgh", "ucw28kfe3tzns5mq", "main"
+local BASE
+do
+    local okSha, body = pcall(game.HttpGet, game,
+        ("https://api.github.com/repos/%s/%s/commits/%s"):format(OWNER, REPO, BRANCH))
+    local sha = okSha and type(body) == "string" and body:match('"sha"%s*:%s*"(%x+)"')
+    BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO, sha or BRANCH)
+    print("[witherhook test] base: " .. BASE)
+end
 local library = loadstring(game:HttpGet(BASE .. "library.lua"))()
 
 -- ---------- pass/fail harness ----------

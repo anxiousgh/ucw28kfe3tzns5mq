@@ -13,7 +13,22 @@ local OWNER  = "anxiousgh"
 local REPO   = "ucw28kfe3tzns5mq"
 local BRANCH = "main"
 
-local BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO, BRANCH)
+-- raw.githubusercontent AND most executor HttpGet caches ignore query
+-- strings, so pin the URL to the latest commit SHA: a unique path the
+-- cache can't stale. Falls back to the branch if the API call fails.
+local BASE
+do
+    local okSha, body = pcall(game.HttpGet, game,
+        ("https://api.github.com/repos/%s/%s/commits/%s"):format(OWNER, REPO, BRANCH))
+    local sha = okSha and type(body) == "string" and body:match('"sha"%s*:%s*"(%x+)"')
+    if sha then
+        BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO, sha)
+        print("[witherhook] pinned to commit " .. sha:sub(1, 12))
+    else
+        BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO, BRANCH)
+        warn("[witherhook] commit pin failed - using branch (may be cached)")
+    end
+end
 
 -- ---------- raw fetch ----------
 local function fetch(path)

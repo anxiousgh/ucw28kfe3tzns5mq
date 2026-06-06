@@ -2284,7 +2284,7 @@ function library:Init(key)
                 textboxTwoStraint.MaxSize = Vector2.new(388 - ForcedMaxSize.X, 20)
                 textBoxValuesStraint.MaxSize = Vector2.new(388 - ForcedMaxSize.X, 20)
                 
-                function ResizeTextStraints()
+                local function ResizeTextStraints()
                     ForcedMinSize = TextService:GetTextSize(textBoxValues.PlaceholderText, textBoxValues.TextSize, textBoxValues.Font, Vector2.new(math.huge,math.huge))
                     if place ~= "" then
                         textboxStraint.MinSize = Vector2.new(ForcedMinSize.X + 10, 22)
@@ -2296,7 +2296,7 @@ function library:Init(key)
                         textBoxValuesStraint.MinSize = Vector2.new(26, 20)
                     end
                 end
-                function ResizeTextBox()
+                local function ResizeTextBox()
                     NewTextboxSize = TextService:GetTextSize(textBoxValues.Text, textBoxValues.TextSize, textBoxValues.Font, Vector2.new(math.huge,math.huge))
                     if NewTextboxSize.X < (396 - ForcedMaxSize.X) - 10 then
                         TweenService:Create(textBoxValues, TweenTable["TextBox"], {Size = UDim2.new(0, NewTextboxSize.X + 8, 0, 20)}):Play()
@@ -2308,7 +2308,7 @@ function library:Init(key)
                         TweenService:Create(textbox, TweenTable["TextBox"], {Size = UDim2.new(0, (396 - ForcedMaxSize.X) - 10, 0, 22)}):Play()
                     end
                 end
-                function SetMaxSize()
+                local function SetMaxSize()
                     ForcedMaxSize = TextService:GetTextSize(textboxLabel.Text, textboxLabel.TextSize, textboxLabel.Font, Vector2.new(math.huge,math.huge))
                     local def = 396 - ForcedMaxSize.X
                     textboxStraint.MaxSize = Vector2.new(def - 10, 22)
