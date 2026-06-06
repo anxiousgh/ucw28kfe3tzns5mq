@@ -4293,15 +4293,12 @@ F.forceChat = (function()
         end
     end
 
+    -- Only hide the chat INPUT box (the bar you type in); leave the chat
+    -- window/messages and bubbles intact so chat isn't fully disabled.
     local function disableOnce()
-        pcall(function()
-            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
-        end)
         if TextChatService then
             for _, c in ipairs(TextChatService:GetDescendants()) do
-                if c:IsA("ChatWindowConfiguration")
-                or c:IsA("ChatInputBarConfiguration")
-                or c:IsA("BubbleChatConfiguration") then
+                if c:IsA("ChatInputBarConfiguration") then
                     pcall(function() c.Enabled = false end)
                 end
             end
