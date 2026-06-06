@@ -319,6 +319,15 @@ regDropdown(Checks, "HC_VisOrigin", "Origin", "Camera", { "Camera", "Head", "Too
 --  UTILS
 -- ============================================================
 local Utils = Window:NewTab("Utils")
+
+Utils:NewSection("Auto stomp")
+regToggle(Utils, "HC_AutoStomp", "Auto stomp", false, function(v)
+    if v then hc.autoStomp.start() else hc.autoStomp.stop() end
+end)
+regSlider(Utils, "HC_StompRadius", "Stomp radius", "", { min = 1, max = 50, default = math.floor(hc.autoStomp.getRadius() or 5) }, function(v) hc.autoStomp.setRadius(v) end)
+regSlider(Utils, "HC_StompInterval", "Min interval", " ms", { min = 0, max = 2000, default = math.floor((hc.autoStomp.getInterval() or 0) * 1000) }, function(v) hc.autoStomp.setInterval(v / 1000) end)
+regToggle(Utils, "HC_StompRage", "Stomp targets only", false, function(v) hc.autoStomp.setRageTargets(v) end)
+
 Utils:NewSection("Godmode")
 regToggle(Utils, "HC_Godmode", "Godmode", false, function(v)
     if v then hc.godmode.start() else hc.godmode.stop() end
