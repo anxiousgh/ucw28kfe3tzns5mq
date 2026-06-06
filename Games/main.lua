@@ -141,6 +141,14 @@ ctx.api = {
     regDropdown = regDropdown,
 }
 
+-- The shared tabs (Movement/Misc/Settings/Config) build ON DEMAND so a
+-- game/universal module can add ITS tabs first (keeping them at the top),
+-- then call ctx.api.buildShared() to append these below.
+local _builtShared = false
+local function buildShared()
+    if _builtShared then return end
+    _builtShared = true
+
 -- ============================================================
 --  MOVEMENT
 -- ============================================================
@@ -390,3 +398,6 @@ end)
 library:CreateKeybindList("witherhook")
 
 notify("witherhook ready", 3, "success")
+end   -- buildShared
+
+ctx.api.buildShared = buildShared

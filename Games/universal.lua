@@ -95,3 +95,6 @@ end)
 regDropdown(Checks, "VisOrigin", "Origin", "Camera", { "Camera", "Head", "Tool" }, false, function(v)
     hook.utils.setVisibleOrigin(v)
 end)
+
+-- shared tabs (Movement/Misc/Settings/Config) go BELOW the combat tabs
+api.buildShared()

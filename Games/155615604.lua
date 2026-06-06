@@ -96,3 +96,6 @@ end)
     if #list == 0 then list = { "—" } end
     gunDrop:SetOptions(list)
 end)
+
+-- shared tabs (Movement/Misc/Settings/Config) go BELOW the Prison Life tabs
+api.buildShared()
