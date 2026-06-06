@@ -188,6 +188,18 @@ function library:UnlockFps(new) -- syn only
     end
 end
 
+-- Fully unload the UI: destroys every ScreenGui this library spawned
+-- (window, watermark, notifications, leftover intro) and flags Unloaded.
+function library:Remove()
+    library.Unloaded = true
+    for _, v in pairs(CoreGuiService:GetChildren()) do
+        local n = v.Name
+        if n == "screen" or n == "watermark" or n == "Notifications" or n == "introduction" then
+            pcall(function() v:Destroy() end)
+        end
+    end
+end
+
 function library:Watermark(text)
     for i,v in pairs(CoreGuiService:GetChildren()) do
         if v.Name == "watermark" then
@@ -885,6 +897,7 @@ function library:Init(key)
     drag(edge, 0.04)
     local CanChangeVisibility = true
     UserInputService.InputBegan:Connect(function(input)
+        if library.Unloaded then return end
         if CanChangeVisibility and input.KeyCode == key then
             edge.Visible = not edge.Visible
         end
