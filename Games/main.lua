@@ -563,6 +563,14 @@ Misc:NewSection("Respawn")
 Misc:NewButton("Respawn", function() hook.respawn.fire() end)
 Misc:NewKeybind("Respawn key", Enum.KeyCode.T, function() hook.respawn.fire() end)
 
+Misc:NewSection("Emotes")
+-- ON: emotes keep playing while you move. OFF: they stop when you move (vanilla)
+regToggle(Misc, "StickyEmotes", "Emotes stay while moving", false, function(v)
+    if hook.stickyEmote then
+        if v then hook.stickyEmote.start() else hook.stickyEmote.stop() end
+    end
+end)
+
 -- ============================================================
 --  SETTINGS  (universal GUI prefs, autosaved, NOT part of configs)
 -- ============================================================
