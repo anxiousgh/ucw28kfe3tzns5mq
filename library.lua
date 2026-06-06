@@ -12,6 +12,20 @@ local CoreGuiService = game:GetService("CoreGui")
 local ContentService = game:GetService("ContentProvider")
 local TeleportService = game:GetService("TeleportService")
 
+-- Canonical name for a keybind input. Keyboard -> KeyCode.Name; mouse
+-- buttons (incl. MB4/MB5 where the platform/executor reports them) ->
+-- the UserInputType name like "MouseButton4". Returns nil for anything
+-- we don't bind (mouse movement, wheel, touch, etc.).
+local function getInputName(input)
+    if input.KeyCode and input.KeyCode ~= Enum.KeyCode.Unknown then
+        return input.KeyCode.Name
+    end
+    local uit = input.UserInputType
+    local n = uit and uit.Name
+    if n and n:find("MouseButton") then return n end
+    return nil
+end
+
 -- / Tween table & function
 local TweenTable = {
     Default = {
@@ -2110,7 +2124,9 @@ function library:Init(key)
                 keybindStraint.MinSize = Vector2.new(30, 22)
     
                 local Shortcuts = {
-                    Return = "enter"
+                    Return = "enter",
+                    MouseButton1 = "MB1", MouseButton2 = "MB2", MouseButton3 = "MB3",
+                    MouseButton4 = "MB4", MouseButton5 = "MB5",
                 }
     
                 keybindButtonLabel.Text = Shortcuts[default_t.Name] or default_t.Name
@@ -2136,8 +2152,8 @@ function library:Init(key)
                 keybind.MouseButton1Click:Connect(function()
                     keybindButtonLabel.Text = ". . ."
                     local InputWait = UserInputService.InputBegan:wait()
-                    if UserInputService.WindowFocused and InputWait.KeyCode.Name ~= "Unknown" then
-                        local keyName = InputWait.KeyCode.Name
+                    local keyName = getInputName(InputWait)
+                    if UserInputService.WindowFocused and keyName then
                         if keyName == "BackSlash" or keyName == "Escape" then
                             -- \ or Esc clears the bind (and drops it from the keybind list)
                             ChosenKey = ""
@@ -2152,7 +2168,7 @@ function library:Init(key)
                 if UserInputService.WindowFocused then
                     UserInputService.InputBegan:Connect(function(c, p)
                         if not p then
-                            if c.KeyCode.Name == ChosenKey and not UserInputService:GetFocusedTextBox() then
+                            if getInputName(c) == ChosenKey and not UserInputService:GetFocusedTextBox() then
                                 On = not On
                                 local SizeOn = On and UDim2.new(0, 12, 0, 12) or UDim2.new(0, 0, 0, 0)
                                 local Transparency = On and 0 or 1
@@ -2376,8 +2392,8 @@ function library:Init(key)
             keybindButton.MouseButton1Click:Connect(function()
                 keybindButtonLabel.Text = "..."
                 local InputWait = UserInputService.InputBegan:wait()
-                if UserInputService.WindowFocused and InputWait.KeyCode.Name ~= "Unknown" then
-                    local keyName = InputWait.KeyCode.Name
+                local keyName = getInputName(InputWait)
+                if UserInputService.WindowFocused and keyName then
                     if keyName == "BackSlash" or keyName == "Escape" then
                         -- \ or Esc clears the bind (and drops it from the keybind list)
                         ChosenKey = ""
@@ -2392,8 +2408,8 @@ function library:Init(key)
             keybind.MouseButton1Click:Connect(function()
                 keybindButtonLabel.Text = ". . ."
                 local InputWait = UserInputService.InputBegan:wait()
-                if UserInputService.WindowFocused and InputWait.KeyCode.Name ~= "Unknown" then
-                    local keyName = InputWait.KeyCode.Name
+                local keyName = getInputName(InputWait)
+                if UserInputService.WindowFocused and keyName then
                     if keyName == "BackSlash" or keyName == "Escape" then
                         -- \ or Esc clears the bind (and drops it from the keybind list)
                         ChosenKey = ""
@@ -2408,7 +2424,7 @@ function library:Init(key)
             if UserInputService.WindowFocused then
                 UserInputService.InputBegan:Connect(function(c, p)
                     if not p then
-                        if c.KeyCode.Name == ChosenKey and not UserInputService:GetFocusedTextBox() then
+                        if getInputName(c) == ChosenKey and not UserInputService:GetFocusedTextBox() then
                             callback(ChosenKey)
                             return
                         end
