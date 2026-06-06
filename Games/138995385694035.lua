@@ -257,11 +257,9 @@ local function tpShoot()
     uprightTp(lc, lhrp, thrp.Position, thrp.CFrame.LookVector)
     task.wait(0.12)
     pcall(hc.forceHit.fire)
-    task.spawn(function()
-        task.wait(1)
-        if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
-        if not wasActive then hc.forceHit.stop() end
-    end)
+    -- TP back immediately after the shot
+    if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
+    if not wasActive then hc.forceHit.stop() end
 end
 
 local function gotoTarget()
