@@ -771,9 +771,11 @@ function library:Introduction()
     xsx.Parent = background
     xsx.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     xsx.BackgroundTransparency = 1.000
-    xsx.Size = UDim2.new(0, 80, 0, 21)
+    xsx.Position = UDim2.new(0, 6, 0, 0)
+    xsx.Size = UDim2.new(0, 220, 0, 21)
     xsx.Font = Enum.Font.Code
-    xsx.Text = ""
+    xsx.Text = "VAMPIRE WAS HEREEE!!"
+    xsx.TextXAlignment = Enum.TextXAlignment.Left
     xsx.TextColor3 = Color3.fromRGB(124, 124, 124)
     xsx.TextSize = 10.000
     xsx.TextTransparency = 1
