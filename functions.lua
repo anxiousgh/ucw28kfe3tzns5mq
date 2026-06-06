@@ -74,6 +74,7 @@ local CamLockSettings = {
     Mode="Mouse", FOVRadius=200, ShowFOV=false,
     Prediction=false, PredictionAmount=0.165,
     Smoothing=0.25, Sticky=true,
+    ToolCheck=false, OnlyVisible=false,
 }
 
 local TrigSettings = {
@@ -81,6 +82,7 @@ local TrigSettings = {
     Prediction=false, PredictionAmount=0.1,
     ClickDelay=0, FOVRadius=20, ShowFOV=false,
     TargetPart="HumanoidRootPart", ShowTarget=false,
+    ToolCheck=false,
 }
 
 local RageSettings = {
@@ -1648,6 +1650,13 @@ end
 
 local clStickyTarget = nil
 
+-- true if WE currently have a Tool equipped (used by Tool Check on camlock +
+-- triggerbot so they don't lock/click while we're empty-handed)
+local function lpHasTool()
+    local c = lplr.Character
+    return c ~= nil and c:FindFirstChildOfClass("Tool") ~= nil
+end
+
 local function clIsVisible(plr)
     local char=plr.Character; local lchar=lplr.Character
     if not char or not lchar then return false end
@@ -1659,6 +1668,21 @@ local function clIsVisible(plr)
         if p.Character and p.Character~=char and p.Character~=lchar then table.insert(ignore,p.Character) end
     end
     return isReallyVisible(camPos, root.Position, ignore)
+end
+
+-- visibility check for an arbitrary target PART (for camlock OnlyVisible)
+local function clPartVisible(part)
+    if not part then return false end
+    local lchar = lplr.Character
+    if not lchar then return false end
+    local pchar = part.Parent
+    local camPos = _visGetOrigin()
+    local ignore = { lchar }
+    if pchar then table.insert(ignore, pchar) end
+    for _, p in ipairs(_cachedPlayers) do
+        if p.Character and p.Character ~= pchar and p.Character ~= lchar then table.insert(ignore, p.Character) end
+    end
+    return isReallyVisible(camPos, part.Position, ignore)
 end
 
 local function clIsAlive(plr)
@@ -1745,7 +1769,12 @@ RunService.RenderStepped:Connect(function(dt)
     end
     if not CamLockSettings.Enabled then clStickyTarget = nil; return end
     if G.freecamActive then return end
+    -- Tool Check: don't lock while we have no tool equipped
+    if CamLockSettings.ToolCheck and not lpHasTool() then return end
     local part = clFindTarget(); if not part then return end
+    -- Only visible: pause the lock while the target is behind cover; it
+    -- resumes automatically once they're in line of sight again
+    if CamLockSettings.OnlyVisible and not clPartVisible(part) then return end
     local targetPos = CamLockSettings.Prediction
         and (part.Position + (part.AssemblyLinearVelocity * CamLockSettings.PredictionAmount))
         or part.Position
@@ -1892,6 +1921,8 @@ RunService.Heartbeat:Connect(function(dt)
     end
 
     if not TrigSettings.Enabled then return end
+    -- Tool Check: don't fire a click while we have no tool equipped
+    if TrigSettings.ToolCheck and not lpHasTool() then return end
     if (tick() - _trigLastShot) * 1000 < TrigSettings.ClickDelay then return end
     if not hitPlr then return end
     _trigLastShot = tick()
@@ -3832,6 +3863,8 @@ F.camLock = {
     setPrediction   = function(b) CamLockSettings.Prediction = b == true end,
     setPredictionAmount = function(n) CamLockSettings.PredictionAmount = math.clamp(tonumber(n) or 0.165, 0, 2) end,
     setClosestPart  = function(b) CamLockSettings.ClosestPart = b == true end,
+    setToolCheck    = function(b) CamLockSettings.ToolCheck = b == true end,
+    setOnlyVisible  = function(b) CamLockSettings.OnlyVisible = b == true end,
 }
 
 -- triggerbot
@@ -3847,6 +3880,7 @@ F.triggerbot = {
     setShowFov      = function(b) TrigSettings.ShowFOV = b == true end,
     setHitPart      = function(s) TrigSettings.TargetPart = tostring(s) end,
     setShowTarget   = function(b) TrigSettings.ShowTarget = b == true end,
+    setToolCheck    = function(b) TrigSettings.ToolCheck = b == true end,
 }
 
 -- ragebot
