@@ -2179,6 +2179,7 @@ function library:Init(key)
                 table.insert(library.keybinds, {
                     name   = displayName or text,
                     getKey = function() return ChosenKey end,
+                    setKey = function(k) if type(k) == "string" then ChosenKey = k; keybindButtonLabel.Text = k end end,
                     isOn   = function() return On end,
                 })
 
@@ -2350,7 +2351,9 @@ function library:Init(key)
             keybindButtonLabel:GetPropertyChangedSignal("Text"):Connect(ResizeKeybind)
             ResizeKeybind()
 
-            local ChosenKey = default
+            -- ChosenKey must be a key-NAME string (the listener compares it to
+            -- KeyCode.Name); storing the EnumItem made the default never fire.
+            local ChosenKey = (typeof(default) == "EnumItem") and default.Name or tostring(default)
             keybindButton.MouseButton1Click:Connect(function()
                 keybindButtonLabel.Text = "..."
                 local InputWait = UserInputService.InputBegan:wait()
@@ -2383,6 +2386,14 @@ function library:Init(key)
             end
 
             UpdatePageSize()
+
+            -- register for the keybind list + config save/restore
+            if not library.keybinds then library.keybinds = {} end
+            table.insert(library.keybinds, {
+                name   = text,
+                getKey = function() return ChosenKey end,
+                setKey = function(k) if type(k) == "string" then ChosenKey = k; keybindButtonLabel.Text = k end end,
+            })
 
             local KeybindFunctions = {}
             function KeybindFunctions:Fire()

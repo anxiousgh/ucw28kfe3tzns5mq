@@ -485,12 +485,25 @@ local function saveAutoload() writeJSON(AUTOLOAD_PATH, autoload) end
 local function snapshot()
     local s = {}
     for k, v in pairs(flags) do s[k] = v end
+    -- save keybinds (toggle + standalone) by name
+    local kb = {}
+    for _, b in ipairs(library.keybinds or {}) do
+        if b.getKey then kb[b.name] = b.getKey() end
+    end
+    s.__keybinds = kb
     return s
 end
 local function applyConfig(data)
     if type(data) ~= "table" then return end
     for k, v in pairs(data) do
-        if controls[k] then pcall(controls[k].set, v) end
+        if k ~= "__keybinds" and controls[k] then pcall(controls[k].set, v) end
+    end
+    -- restore keybinds by name
+    if type(data.__keybinds) == "table" then
+        for _, b in ipairs(library.keybinds or {}) do
+            local k = data.__keybinds[b.name]
+            if b.setKey and k ~= nil then pcall(b.setKey, k) end
+        end
     end
 end
 local function saveConfig(dir, name)
