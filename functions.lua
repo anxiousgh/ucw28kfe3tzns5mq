@@ -6488,9 +6488,13 @@ F.games.hoodCustoms.knifeBot = (function()
                 local forward = tHrp.CFrame.LookVector
                 pos = tHrp.Position - forward * attachDistance
             end
-            pcall(function()
-                hrp.CFrame = CFrame.new(pos, tHrp.Position)
-            end)
+            -- guard against a degenerate look CFrame (pos == target) which
+            -- produces NaN and can hard-freeze the client
+            if (pos - tHrp.Position).Magnitude >= 0.5 then
+                pcall(function()
+                    hrp.CFrame = CFrame.new(pos, tHrp.Position)
+                end)
+            end
         end)
 
         if attachClickThread then pcall(task.cancel, attachClickThread) end

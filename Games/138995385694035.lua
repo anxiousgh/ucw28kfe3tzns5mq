@@ -222,6 +222,92 @@ regDropdown(Target, "HC_LineOrigin", "Line origin", "Bottom", { "Bottom", "Cente
 regToggle(Target, "HC_ShowOutline", "Target outline", false, function(v) rb.setShowOutline(v) end)
 regColor(Target, "HC_OutlineColor", "Outline color", Color3.fromRGB(255, 80, 80), function(c) rb.setOutlineColor(c) end)
 
+-- ---------- Target HUD (styled like the menu) ----------
+Target:NewSection("Target HUD")
+do
+    local guiParent = (gethui and gethui()) or game:GetService("CoreGui")
+    local function mk(class, props)
+        local i = Instance.new(class)
+        for k, v in pairs(props) do i[k] = v end
+        return i
+    end
+
+    local hud = mk("ScreenGui", { Name = "hc_targethud", ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Enabled = false })
+    pcall(function() hud.ResetOnSpawn = false end)
+    hud.Parent = guiParent
+
+    local edge = mk("Frame", { Name = "edge", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 10),
+        Size = UDim2.fromOffset(280, 96), BackgroundColor3 = Color3.fromRGB(60, 60, 60), Parent = hud })
+    mk("UICorner", { CornerRadius = UDim.new(0, 2), Parent = edge })
+    local bg = mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(1, -2, 1, -2), BackgroundColor3 = Color3.fromRGB(255, 255, 255), ClipsDescendants = true, Parent = edge })
+    mk("UICorner", { CornerRadius = UDim.new(0, 2), Parent = bg })
+    mk("UIGradient", { Rotation = 90, Parent = bg,
+        Color = ColorSequence.new{ ColorSequenceKeypoint.new(0, Color3.fromRGB(34, 34, 34)), ColorSequenceKeypoint.new(1, Color3.fromRGB(28, 28, 28)) } })
+    local accentBar = mk("Frame", { BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = library.accentColor, Parent = bg })
+
+    local avatar = mk("ImageLabel", { Position = UDim2.fromOffset(8, 8), Size = UDim2.fromOffset(56, 56),
+        BackgroundColor3 = Color3.fromRGB(40, 40, 40), Image = "", Parent = bg })
+    mk("UICorner", { CornerRadius = UDim.new(0, 2), Parent = avatar })
+    local function lbl(x, y, w, txt, size, xalign)
+        return mk("TextLabel", { Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(w, 16),
+            BackgroundTransparency = 1, Font = Enum.Font.Code, Text = txt or "", TextColor3 = Color3.fromRGB(200, 200, 200),
+            TextSize = size or 13, TextXAlignment = xalign or Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Parent = bg })
+    end
+    local stateLbl   = lbl(8, 66, 56, "", 12, Enum.TextXAlignment.Center)
+    local displayLbl = lbl(72, 8, 200, "", 14)
+    local hpBg = mk("Frame", { Position = UDim2.fromOffset(72, 30), Size = UDim2.fromOffset(200, 12),
+        BackgroundColor3 = Color3.fromRGB(40, 40, 40), BorderSizePixel = 0, Parent = bg })
+    mk("UICorner", { CornerRadius = UDim.new(0, 2), Parent = hpBg })
+    local hpFill = mk("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = library.accentColor, BorderSizePixel = 0, Parent = hpBg })
+    mk("UICorner", { CornerRadius = UDim.new(0, 2), Parent = hpFill })
+    local hpText = lbl(72, 29, 200, "", 12, Enum.TextXAlignment.Center); hpText.Parent = hpBg; hpText.Size = UDim2.new(1, 0, 1, 0); hpText.Position = UDim2.new(0, 0, 0, 0); hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    local distLbl = lbl(72, 48, 200, "", 13)
+    local toolLbl = lbl(72, 66, 200, "", 13)
+
+    regToggle(Target, "HC_TargetHud", "Show target HUD", false, function(v) hud.Enabled = v end)
+
+    local lastUserId
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if library.Unloaded then if hud then hud:Destroy() end; conn:Disconnect(); return end
+        if not hud.Enabled then return end
+        local tgt = bestTarget(false, false, nil)   -- highest-priority locked target
+        if not tgt then
+            displayLbl.Text = "No target"; stateLbl.Text = ""; hpText.Text = ""; distLbl.Text = ""; toolLbl.Text = ""
+            hpFill.Size = UDim2.new(0, 0, 1, 0); lastUserId = nil; avatar.Image = ""
+            return
+        end
+        if tgt.UserId ~= lastUserId then
+            lastUserId = tgt.UserId
+            task.spawn(function()
+                local ok, img = pcall(function()
+                    return Players:GetUserThumbnailAsync(tgt.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+                end)
+                if ok and img then avatar.Image = img end
+            end)
+        end
+        displayLbl.Text = string.format("%s (@%s) | #%d", tgt.DisplayName, tgt.Name, tgt.UserId)
+        local ch  = tgt.Character
+        local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        stateLbl.Text = isKnocked(tgt) and "KNOCKED" or (hum and hum.Health > 0 and "Alive" or "Dead")
+        if hum then
+            local mh = hum.MaxHealth > 0 and hum.MaxHealth or 100
+            hpText.Text = math.floor(hum.Health) .. "/" .. math.floor(mh)
+            hpFill.Size = UDim2.new(math.clamp(hum.Health / mh, 0, 1), 0, 1, 0)
+        else
+            hpText.Text = "?"; hpFill.Size = UDim2.new(0, 0, 1, 0)
+        end
+        local root = myRoot()
+        distLbl.Text = (root and hrp) and ("Distance: " .. math.floor((hrp.Position - root.Position).Magnitude) .. "m") or "Distance: -"
+        local tool = ch and ch:FindFirstChildOfClass("Tool")
+        toolLbl.Text = "Tool: " .. (tool and tool.Name or "none")
+        accentBar.BackgroundColor3 = library.accentColor
+        hpFill.BackgroundColor3 = library.accentColor
+    end)
+end
+
 -- ============================================================
 --  COMBAT
 -- ============================================================
@@ -302,7 +388,7 @@ regSlider(Combat, "HC_VoidEnd", "End at % of anim", "%", { min = 0, max = 100, d
 regToggle(Combat, "HC_KnifeAttach", "Attach to target", false, function(v)
     if v then hc.knifeBot.attach.start() else hc.knifeBot.attach.stop() end
 end)
-regSlider(Combat, "HC_KnifeDistance", "Attach distance", "", { min = 0, max = 50, default = 3 }, function(v) hc.knifeBot.attach.setDistance(v) end)
+regSlider(Combat, "HC_KnifeDistance", "Attach distance", "", { min = 1, max = 50, default = 3 }, function(v) hc.knifeBot.attach.setDistance(v) end)
 regDecimal(Combat, "HC_KnifeClick", "Click interval", "s", 0.05, 5, 0.6, 100, function(v) hc.knifeBot.attach.setClickInterval(v) end)
 regToggle(Combat, "HC_KnifeOrbit", "Orbit target", false, function(v) hc.knifeBot.attach.setOrbit(v) end)
 regSlider(Combat, "HC_KnifeOrbitSpeed", "Orbit speed", " deg/s", { min = 0, max = 720, default = 180 }, function(v) hc.knifeBot.attach.setOrbitSpeed(v) end)
