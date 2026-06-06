@@ -390,9 +390,12 @@ Visuals:NewSection("Camera")
 regToggle(Visuals, "UnlockZoom", "Unlock zoom", false, function(v) if v then hook.zoom.start() else hook.zoom.stop() end end)
 
 -- Server position visualizer: a ForceField clone of your character parked
--- at your server-side position. Reading HRP.CFrame on Heartbeat (after
--- physics, when position-spoofs have set the server-bound CFrame) gives
--- the server position for any spoof; with none it just sits on you.
+-- where the SERVER thinks you are. The position comes from hook.serverPos
+-- (a RakNet observer hook on physics packet 0x1B): it tracks your real
+-- position normally, and freezes at the last server-received spot whenever
+-- a position spoof is blocking replication (desync/invisible/lagswitch).
+-- So with a spoof on, the clone sits at your server position; with none,
+-- it sits on you.
 Visuals:NewSection("Server position")
 do
     local RunSvc = game:GetService("RunService")
@@ -423,7 +426,14 @@ do
 
     regToggle(Visuals, "ServerPosViz", "Server position visualizer", false, function(v)
         serverVizOn = v
-        if v then buildClone() else destroyClone() end
+        if v then
+            if hook.serverPos and not hook.serverPos.start() then
+                notify("Server pos needs a RakNet-capable executor", 4, "alert")
+            end
+            buildClone()
+        else
+            destroyClone()
+        end
     end)
     LocalPlr.CharacterAdded:Connect(function()
         if serverVizOn then task.wait(0.4); if serverVizOn then buildClone() end end
@@ -432,10 +442,13 @@ do
         if library.Unloaded then destroyClone(); return end
         if not serverVizOn then return end
         local char = LocalPlr.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
         if not clone or not clone.Parent then buildClone() end
-        if clone then pcall(function() clone:PivotTo(hrp.CFrame) end) end
+        -- server position from the RakNet tracker; fall back to live HRP
+        -- until the first 0x1B packet is observed
+        local cf = (hook.serverPos and hook.serverPos.getCFrame()) or hrp.CFrame
+        if clone then pcall(function() clone:PivotTo(cf) end) end
     end)
 end
 

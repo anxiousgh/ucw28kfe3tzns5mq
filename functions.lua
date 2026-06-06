@@ -11598,6 +11598,73 @@ F.desync = (function()
 end)()
 
 -- ============================================================
+--  SERVER POSITION TRACKER (RakNet)
+-- ============================================================
+--  Reads where the SERVER currently thinks we are, via a RakNet
+--  *observer* send-hook on the physics-replication packet (0x1B).
+--  It never blocks - it only watches. Every time a 0x1B is allowed
+--  to flow, the server is receiving our current HRP, so we record
+--  HRP.CFrame as the server position. While something is BLOCKING
+--  0x1B (e.g. F.desync raknet/invisible, F.pulseLagswitch during an
+--  off-phase) we stop recording, so the stored CFrame stays frozen
+--  at the last position the server actually received - which is
+--  exactly where the server thinks we are. With no spoof active it
+--  just tracks our real position (server == client).
+--
+--  This makes the value GENERAL: any block/drop-style position spoof
+--  is reflected, not just one desync mode. (Byte-rewriting spoofs
+--  would need packet parsing; witherhook's spoofs all block, so
+--  recording HRP-at-send-time is exact.)
+-- ============================================================
+F.serverPos = (function()
+    local function findRaknet()
+        local r = rawget(getgenv(), "raknet")
+        if r then return r end
+        local ok, val = pcall(function() return raknet end)
+        if ok and val then return val end
+        return nil
+    end
+
+    -- Is some hook currently suppressing outbound 0x1B physics packets?
+    -- Mirrors the shared state the desync / lagswitch publish so we know
+    -- when NOT to advance the recorded server position.
+    local function isBlocking()
+        local d = getgenv()._F_DESYNC_STATE
+        if d and d.active and (d.mode == "raknet" or d.mode == "invisible") then
+            return true
+        end
+        if getgenv()._F_LAGSWITCH_BLOCKING then return true end
+        return false
+    end
+
+    local function ensureHook()
+        if getgenv()._F_SERVERPOS_INSTALLED then return true end
+        local r = findRaknet()
+        if not r or not r.add_send_hook then return false end
+        getgenv()._F_SERVERPOS_INSTALLED = true
+        getgenv()._F_SERVERPOS_FN = function(packet)
+            -- observer only: never returns false, never blocks
+            if packet.PacketId == 0x1B and not isBlocking() then
+                local ch  = lplr.Character
+                local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+                if hrp then getgenv()._F_SERVERPOS_CF = hrp.CFrame end
+            end
+        end
+        pcall(function() r.add_send_hook(getgenv()._F_SERVERPOS_FN) end)
+        return true
+    end
+
+    return {
+        -- install the observer hook; returns false if no raknet API
+        start       = function() return ensureHook() end,
+        isAvailable = function() return findRaknet() ~= nil end,
+        -- last position the server received; nil until a 0x1B is seen.
+        -- Callers should fall back to the live HRP if this is nil.
+        getCFrame   = function() return getgenv()._F_SERVERPOS_CF end,
+    }
+end)()
+
+-- ============================================================
 --  PULSE LAGSWITCH
 -- ============================================================
 --  Selectively blocks outgoing PHYSICS REPLICATION packets
