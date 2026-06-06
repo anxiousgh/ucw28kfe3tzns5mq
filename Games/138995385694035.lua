@@ -261,10 +261,25 @@ local function inForceField(plr)
     return ch ~= nil and ch:FindFirstChildOfClass("ForceField") ~= nil
 end
 
+-- true only if BodyEffects.APPEARANCE_LOADED exists and is true
+local function appearanceLoaded(plr)
+    local ch = plr and plr.Character
+    local fx = ch and ch:FindFirstChild("BodyEffects")
+    local v  = fx and fx:FindFirstChild("APPEARANCE_LOADED")
+    return v ~= nil and v.Value == true
+end
+
+-- safe to engage: not spawn-protected and fully loaded
+local function canEngage(plr)
+    return not inForceField(plr) and appearanceLoaded(plr)
+end
+
 -- TP shoot: equip DB -> save spot -> TP to target (upright) -> force-hit -> TP back ~1s
 local function tpShoot()
     if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
     local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
+    if inForceField(tgt) then notify("Target in forcefield", 2, "alert"); return end
+    if not appearanceLoaded(tgt) then notify("Target not loaded", 2, "alert"); return end
     local lc   = LocalPlayer.Character
     local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
     local thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
@@ -293,6 +308,8 @@ end
 local function bring()
     if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
     local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
+    if inForceField(tgt) then notify("Target in forcefield", 2, "alert"); return end
+    if not appearanceLoaded(tgt) then notify("Target not loaded", 2, "alert"); return end
     local lc   = LocalPlayer.Character
     local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
     if not lhrp then return end
@@ -504,8 +521,8 @@ task.spawn(function()
         if autoOn then
             -- highest-priority locked target in range + visible, skipping knocked
             local p = bestTarget(knockCheckOn or ignoreKnockedOn, true, autoRange)
-            -- don't shoot players under spawn protection (ForceField)
-            if p and not inForceField(p) then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
+            -- only shoot loaded players who aren't spawn-protected (ForceField)
+            if p and canEngage(p) then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
         end
         task.wait(math.max(0.03, autoCooldown))
     end
