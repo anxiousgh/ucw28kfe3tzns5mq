@@ -3142,10 +3142,12 @@ F.stickyEmote = (function()
             end
         end)
     end
-    -- Copy whatever emote `plr` is currently playing onto us and keep it
-    -- sticky. Reads the target's playing animation tracks, picks the first
-    -- that passes the emote filter, then drives our normal sticky machinery
-    -- with that AnimationId so the Heartbeat keep-alive loops it.
+    -- Copy whatever emote `plr` is currently playing onto us, ONCE.
+    -- We do NOT enable the global sticky machinery here (that hooks every
+    -- animation and makes them all loop forever). Whether the copied emote
+    -- survives movement is decided by the "Emotes stay while moving" toggle:
+    --   * toggle ON  -> route through the sticky machinery so it loops
+    --   * toggle OFF -> play it once; it stops when you move (and goes away)
     local function syncWith(plr)
         local ch  = plr and plr.Character
         local hum = ch and ch:FindFirstChildOfClass("Humanoid")
@@ -3162,20 +3164,20 @@ F.stickyEmote = (function()
             end
         end
         if not id then return false end
-        if not G.stickyEmoteActive then startFn() end
-        G._emoteStopRequested = false
-        stopOurs()
-        G._currentEmoteId = id
         local myAnimator = getAnimator()
-        if myAnimator then
-            local anim = Instance.new("Animation"); anim.AnimationId = id
-            local tr; pcall(function() tr = myAnimator:LoadAnimation(anim) end)
-            if tr then
-                pcall(function() tr.Priority = Enum.AnimationPriority.Action4 end)
-                pcall(function() tr:Play(0) end)
-                G._stickyTracks[tr] = true
-            end
+        if not myAnimator then return false end
+        local anim = Instance.new("Animation"); anim.AnimationId = id
+        local tr; pcall(function() tr = myAnimator:LoadAnimation(anim) end)
+        if not tr then return false end
+        if G.stickyEmoteActive then
+            -- sticky on: let the keep-alive loop it through movement
+            G._emoteStopRequested = false
+            stopOurs()
+            G._currentEmoteId = id
+            pcall(function() tr.Priority = Enum.AnimationPriority.Action4 end)
+            G._stickyTracks[tr] = true
         end
+        pcall(function() tr:Play(0) end)
         return true
     end
 
