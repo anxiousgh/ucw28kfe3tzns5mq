@@ -67,13 +67,47 @@ local ctx = {
     gameKey = gameKey,
 }
 
-local ok = pcall(function()
-    load("Games/" .. gameKey .. ".lua")(ctx)
-end)
+-- A fetched body counts as "missing" if it's empty or GitHub's 404 text.
+-- (Some executors return "" / "404: Not Found" instead of erroring on 404,
+--  and loadstring("") is a valid no-op chunk -- which silently swallowed the
+--  fallback before.)
+local function bodyIsMissing(body)
+    if type(body) ~= "string" then return true end
+    if #(body:gsub("%s+", "")) == 0 then return true end
+    if body:find("404: Not Found", 1, true) then return true end
+    return false
+end
 
-if not ok then
-    -- no per-game module: load the universal shell
-    load("Games/universal.lua")(ctx)
+-- Run a per-game module. Returns true ONLY if it really existed and ran.
+local function tryGameModule(key)
+    local okFetch, body = pcall(game.HttpGet, game, BASE .. "Games/" .. key .. ".lua")
+    if not okFetch or bodyIsMissing(body) then
+        return false
+    end
+    local fn, compileErr = loadstring(body)
+    if not fn then
+        warn("[witherhook] Games/" .. key .. ".lua compile error: " .. tostring(compileErr))
+        return false
+    end
+    local okRun, runErr = pcall(fn, ctx)
+    if not okRun then
+        warn("[witherhook] Games/" .. key .. ".lua runtime error: " .. tostring(runErr))
+        return false
+    end
+    print("[witherhook] loaded per-game module: Games/" .. key .. ".lua")
+    return true
+end
+
+if not tryGameModule(gameKey) then
+    -- default shell -- surfaced loudly if it ever breaks, instead of an empty UI
+    local okU, errU = pcall(function() load("Games/universal.lua")(ctx) end)
+    if okU then
+        print("[witherhook] loaded universal shell (no module for placeId " .. gameKey .. ")")
+    else
+        warn("[witherhook] universal shell failed: " .. tostring(errU))
+        Notif:Notify("witherhook: UI failed to load (see console)", 6, "error")
+        return
+    end
 end
 
 Notif:Notify("witherhook loaded", 4, "success")
