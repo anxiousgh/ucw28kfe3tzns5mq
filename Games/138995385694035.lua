@@ -291,21 +291,21 @@ local function bring()
         -- pause auto-stomp before stacking on top
         local stompWasOn = hc.autoStomp.isActive()
         if stompWasOn then hc.autoStomp.stop() end
-        -- TP upright onto their UpperTorso
-        local part = torsoOf(tgt.Character)
-        if part then uprightTp(lc, lhrp, part.Position, lhrp.CFrame.LookVector) end
-        task.wait(0.05)
-        -- grab once, watch our Grabbed value
+        -- fire grab once, then keep teleporting onto them every frame until our
+        -- Grabbed value changes (or timeout) so we stay glued on top
         local fx       = lc:FindFirstChild("BodyEffects")
         local grab     = fx and fx:FindFirstChild("Grabbed")
         local startVal = grab and grab.Value
         pcall(function() ReplicatedStorage.MainEvent:FireServer("Grabbing") end)
         local t0 = os.clock()
         repeat
+            local part = torsoOf(tgt.Character)
+            if part and lhrp and lhrp.Parent then
+                uprightTp(lc, lhrp, part.Position, lhrp.CFrame.LookVector)
+            end
             task.wait()
             grab = fx and fx:FindFirstChild("Grabbed")
         until (grab and grab.Value ~= startVal) or (os.clock() - t0 > 5) or not lhrp.Parent
-        task.wait(0.5)   -- TP back 0.5s after the grab registers
         if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
         if stompWasOn then hc.autoStomp.start() end
     end)
@@ -314,6 +314,7 @@ end
 Target:NewButton("TP shoot", tpShoot)
     :AddButton("Goto", gotoTarget)
 Target:NewButton("Bring", bring)
+Target:NewKeybind("TP shoot key", Enum.KeyCode.K, tpShoot)
 
 -- Visualization: ragebot target line + outline for the locked target
 Target:NewSection("Visualization")
