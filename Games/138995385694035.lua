@@ -337,13 +337,13 @@ local function bring()
             return
         end
 
-        -- 2) Grab: stay on top and SPAM the Grabbing remote every 0.1s until
+        -- 2) Grab: stay on top and SPAM the Grabbing remote every 0.5s until
         --    our BodyEffects.Grabbed value changes (= grab landed).
         local t0 = os.clock()
         repeat
             onTopOfTarget()
             pcall(function() ReplicatedStorage.MainEvent:FireServer("Grabbing") end)
-            task.wait(0.1)
+            task.wait(0.5)
             grab = fx and fx:FindFirstChild("Grabbed")
         until (grab and grab.Value ~= startVal) or (os.clock() - t0 > 5) or not lhrp.Parent
 
