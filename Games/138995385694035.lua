@@ -23,14 +23,16 @@ if not hc or not rb then
     return
 end
 
-local Players      = game:GetService("Players")
-local RunService   = game:GetService("RunService")
-local LocalPlayer  = Players.LocalPlayer
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local LocalPlayer       = Players.LocalPlayer
 
 -- decay's knock check: workspace.Players.Characters[name].BodyEffects["K.O"]
 -- (or grabbed). Skip these when knock-check is on.
 local isKnocked = hc.isKnocked or function() return false end
-local knockCheckOn = false
+local knockCheckOn   = false   -- skip knocked when firing
+local ignoreKnockedOn = false  -- camlock/active-target falls through knocked -> next priority
 
 -- ---------- shared targeting helpers ----------
 local function myRoot() return hook.utils.getRoot() end
@@ -105,6 +107,34 @@ local Target = Window:NewTab("Target")
 Target:NewSection("Targeting")
 
 local targetMode = "Closest"
+
+-- Highest-priority LOCKED target passing the filters. Priority = Closest
+-- (min character distance) or Mouse (min viewport distance). Skips knocked
+-- when asked, so the next-best target is chosen instead.
+local function bestTarget(skipKnocked, requireVisible, range)
+    local root = myRoot()
+    local cam  = workspace.CurrentCamera
+    local mp   = UserInputService:GetMouseLocation()
+    local best, bestScore
+    for _, p in ipairs(rb.getTargetList()) do
+        local hrp, ch = aliveParts(p)
+        if hrp
+            and (not (skipKnocked and isKnocked(p)))
+            and (not (range and root) or (hrp.Position - root.Position).Magnitude <= range)
+            and (not requireVisible or isVisible(headPos(), hrp, ch)) then
+            local score
+            if targetMode == "Mouse" then
+                local sp = cam:WorldToViewportPoint(hrp.Position)
+                score = (mp - Vector2.new(sp.X, sp.Y)).Magnitude
+            else
+                score = root and (hrp.Position - root.Position).Magnitude or 0
+            end
+            if not best or score < bestScore then best, bestScore = p, score end
+        end
+    end
+    return best
+end
+
 regDropdown(Target, "HC_TargetMode", "Priority", "Closest", { "Closest", "Mouse" }, false, function(v)
     targetMode = v
     pcall(rb.setPriority, v)
@@ -235,22 +265,11 @@ local autoOn, autoRange, autoCooldown = false, 200, 0.15
 regToggle(Combat, "HC_AutoShoot", "Auto shoot (targets only)", false, function(v) autoOn = v end)
 regSlider(Combat, "HC_AutoShootRange", "Range", "", { min = 10, max = 1000, default = 200 }, function(v) autoRange = v end)
 regDecimal(Combat, "HC_AutoShootCooldown", "Cooldown", "s", 0.05, 1, 0.15, 100, function(v) autoCooldown = v end)
-local function pickShootTarget()
-    local root = myRoot(); if not root then return nil end
-    for _, p in ipairs(rb.getTargetList()) do
-        local hrp, ch = aliveParts(p)
-        if hrp and (hrp.Position - root.Position).Magnitude <= autoRange then
-            if (not knockCheckOn) or not isKnocked(p) then
-                if isVisible(headPos(), hrp, ch) then return p end
-            end
-        end
-    end
-    return nil
-end
 task.spawn(function()
     while not library.Unloaded do
         if autoOn then
-            local p = pickShootTarget()
+            -- highest-priority locked target in range + visible, skipping knocked
+            local p = bestTarget(knockCheckOn or ignoreKnockedOn, true, autoRange)
             if p then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
         end
         task.wait(math.max(0.03, autoCooldown))
@@ -264,7 +283,8 @@ regToggle(Combat, "HC_Camlock", "Camlock to target", false, function(v) camlockO
 regDecimal(Combat, "HC_CamlockSmooth", "Smoothing", "", 0, 0.95, 0.5, 100, function(v) camlockSmooth = v end)
 RunService.RenderStepped:Connect(function()
     if library.Unloaded or not camlockOn then return end
-    local tgt = rb.getTarget()
+    -- ignore-knocked: fall through to the next-priority non-knocked target
+    local tgt = bestTarget(ignoreKnockedOn, false, nil)
     local part = targetPart(tgt)
     if not part then return end
     local cam = workspace.CurrentCamera
@@ -310,6 +330,7 @@ regDecimal(Combat, "HC_ReloadCooldown", "Cooldown", "s", 0, 5, hc.autoReload.get
 local Checks = Window:NewTab("Checks")
 Checks:NewSection("Knock check")
 regToggle(Checks, "HC_KnockCheck", "Skip knocked players", false, function(v) knockCheckOn = v; rb.setSkipKnocked(v) end)
+regToggle(Checks, "HC_IgnoreKnocked", "Ignore knocked (switch to next target)", false, function(v) ignoreKnockedOn = v; rb.setIgnoreKnocked(v) end)
 
 Checks:NewSection("Visible check")
 regToggle(Checks, "HC_StrictVis", "Strict (block see-through walls)", false, function(v) hook.utils.setStrictVisibleCheck(v) end)
