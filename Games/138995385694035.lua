@@ -277,26 +277,11 @@ local function bring()
     if not lhrp then return end
     task.spawn(function()
         equipDoubleBarrel()
-        local saved = lhrp.CFrame
-        local thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-        if not thrp then return end
-        -- TP to target (upright) + shoot
-        local wasFH = hc.forceHit.isActive()
-        hc.forceHit.setTarget(tgt)
-        if not wasFH then hc.forceHit.start() end
-        uprightTp(lc, lhrp, thrp.Position, thrp.CFrame.LookVector)
-        task.wait(0.12)
-        pcall(hc.forceHit.fire)
-        if not wasFH then hc.forceHit.stop() end
-        -- pause auto-stomp before stacking on top
-        local stompWasOn = hc.autoStomp.isActive()
-        if stompWasOn then hc.autoStomp.stop() end
-        -- TP upright ONTO the top of their torso (not inside it), THEN fire the
-        -- grab once, and keep re-teleporting on top every frame until our
-        -- Grabbed value changes (or timeout) so we stay glued on top
+        local saved    = lhrp.CFrame
         local fx       = lc:FindFirstChild("BodyEffects")
         local grab     = fx and fx:FindFirstChild("Grabbed")
         local startVal = grab and grab.Value
+
         local function onTopOfTarget()
             local part = torsoOf(tgt.Character)
             if part and lhrp and lhrp.Parent then
@@ -304,6 +289,35 @@ local function bring()
                 uprightTp(lc, lhrp, pos, lhrp.CFrame.LookVector)
             end
         end
+
+        -- pause auto-stomp for the whole sequence so we don't finish them off
+        local stompWasOn = hc.autoStomp.isActive()
+        if stompWasOn then hc.autoStomp.stop() end
+
+        -- 1) You can only grab a KNOCKED player. Stand on them and force-hit
+        --    until they're K.O (skip if already knocked).
+        local wasFH = hc.forceHit.isActive()
+        if not wasFH then hc.forceHit.start() end
+        local kt0 = os.clock()
+        while not isKnocked(tgt) do
+            if not (tgt.Character and tgt.Character.Parent) or not lhrp.Parent then break end
+            onTopOfTarget()
+            hc.forceHit.setTarget(tgt)
+            pcall(hc.forceHit.fire)
+            task.wait(0.08)
+            if os.clock() - kt0 > 4 then break end
+        end
+        if not wasFH then hc.forceHit.stop() end
+
+        if not isKnocked(tgt) then
+            notify("Couldn't knock target", 2, "alert")
+            if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
+            if stompWasOn then hc.autoStomp.start() end
+            return
+        end
+
+        -- 2) Grab: stand on top, fire Grabbing once, and keep re-teleporting on
+        --    top until our BodyEffects.Grabbed value changes (= grab landed).
         onTopOfTarget()
         task.wait()   -- let the teleport land before the server registers the grab
         pcall(function() ReplicatedStorage.MainEvent:FireServer("Grabbing") end)
@@ -313,6 +327,8 @@ local function bring()
             task.wait()
             grab = fx and fx:FindFirstChild("Grabbed")
         until (grab and grab.Value ~= startVal) or (os.clock() - t0 > 5) or not lhrp.Parent
+
+        -- 3) bring them home
         if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
         if stompWasOn then hc.autoStomp.start() end
     end)
@@ -382,7 +398,9 @@ do
     conn = RunService.Heartbeat:Connect(function()
         if library.Unloaded then if hud then hud:Destroy() end; conn:Disconnect(); return end
         if not hud.Enabled then return end
-        local tgt = bestTarget(false, false, nil)   -- highest-priority locked target
+        -- honor the knock checks: skip knocked players when either knock
+        -- toggle is on, so the HUD follows the same target as the camlock
+        local tgt = bestTarget(knockCheckOn or ignoreKnockedOn, false, nil)
         if not tgt then
             -- only show the HUD when there's an actual target
             edge.Visible = false; lastUserId = nil
