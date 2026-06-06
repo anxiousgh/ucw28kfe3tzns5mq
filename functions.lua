@@ -1725,6 +1725,8 @@ local function clFindTarget()
     return closest
 end
 
+local clScanAccum = 0
+local clCachedPart = nil
 RunService.RenderStepped:Connect(function(dt)
     -- Fast early-out: skip the entire camlock per-frame when nothing
     -- in the module wants work (both Enabled and ShowFOV are off).
@@ -1732,6 +1734,7 @@ RunService.RenderStepped:Connect(function(dt)
     -- feature is idle.
     if not CamLockSettings.Enabled and not CamLockSettings.ShowFOV then
         if clStickyTarget then clStickyTarget = nil end
+        if clCachedPart then clCachedPart = nil end
         if CL_fovCircle and CL_fovCircle.Visible then CL_fovCircle.Visible = false end
         return
     end
@@ -1743,9 +1746,18 @@ RunService.RenderStepped:Connect(function(dt)
             CL_fovCircle.Position = mp
         end
     end
-    if not CamLockSettings.Enabled then clStickyTarget = nil; return end
+    if not CamLockSettings.Enabled then clStickyTarget = nil; clCachedPart = nil; return end
     if G.freecamActive then return end
-    local part = clFindTarget(); if not part then return end
+    -- Throttle the expensive target scan (player loop + WorldToViewportPoint
+    -- + visibility raycasts) to ~120 Hz so it doesn't run hundreds of times a
+    -- second at high fps. The camera still steers every frame for smoothness.
+    clScanAccum = clScanAccum + dt
+    if clScanAccum >= (1 / 120) or not clCachedPart then
+        clScanAccum = 0
+        clCachedPart = clFindTarget()
+    end
+    local part = clCachedPart
+    if not part or not part.Parent then return end
     local targetPos = CamLockSettings.Prediction
         and (part.Position + (part.AssemblyLinearVelocity * CamLockSettings.PredictionAmount))
         or part.Position
@@ -1802,7 +1814,9 @@ end
 
 local _trigLastShot = 0
 local _trigCurrentPart = nil  -- currently-best target part this frame, for ShowTarget
-RunService.Heartbeat:Connect(function()
+local _trigScanAccum = 0
+local _trigHitPlr, _trigHitPart = nil, nil
+RunService.Heartbeat:Connect(function(dt)
     -- Fast early-out: skip GetMouseLocation + camera lookup + everything
     -- when triggerbot is fully idle. The old path still hit UIS +
     -- workspace.CurrentCamera each frame even when nothing was on.
@@ -1831,19 +1845,37 @@ RunService.Heartbeat:Connect(function()
 
     -- find best player inside FOV.
     -- TargetPart "All" → scan every BasePart and pick closest to mouse.
-    local hitPlr, hitPart, bestD = nil, nil, math.huge
-    for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
-        if plr == lplr then continue end
-        if F.whitelist and F.whitelist.contains(plr) then continue end
-        if TrigSettings.TeamCheck and plr.Team == lplr.Team then continue end
-        local char = plr.Character; if not char then continue end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then continue end
-        if TrigSettings.VisibleCheck and not trigIsVisible(plr) then continue end
+    -- Throttle this scan (+ visibility raycasts) to ~120 Hz; at high fps it
+    -- was running hundreds of times a second and tanking frames. Click timing
+    -- is gated by ClickDelay anyway, so this doesn't hurt responsiveness.
+    _trigScanAccum = _trigScanAccum + (dt or 0)
+    if _trigScanAccum >= (1 / 120) or _trigHitPlr == nil then
+        _trigScanAccum = 0
+        local hitPlr, hitPart, bestD = nil, nil, math.huge
+        for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
+            if plr == lplr then continue end
+            if F.whitelist and F.whitelist.contains(plr) then continue end
+            if TrigSettings.TeamCheck and plr.Team == lplr.Team then continue end
+            local char = plr.Character; if not char then continue end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health <= 0 then continue end
+            if TrigSettings.VisibleCheck and not trigIsVisible(plr) then continue end
 
-        if TrigSettings.TargetPart == "All" then
-            for _, part in ipairs(char:GetChildren()) do
-                if part:IsA("BasePart") then
+            if TrigSettings.TargetPart == "All" then
+                for _, part in ipairs(char:GetChildren()) do
+                    if part:IsA("BasePart") then
+                        local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+                        if onScreen then
+                            local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
+                            if d <= TrigSettings.FOVRadius and d < bestD then
+                                hitPlr, hitPart, bestD = plr, part, d
+                            end
+                        end
+                    end
+                end
+            else
+                local part = tbResolvePart(char, TrigSettings.TargetPart)
+                if part then
                     local sp, onScreen = cam:WorldToViewportPoint(part.Position)
                     if onScreen then
                         local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
@@ -1853,19 +1885,12 @@ RunService.Heartbeat:Connect(function()
                     end
                 end
             end
-        else
-            local part = tbResolvePart(char, TrigSettings.TargetPart)
-            if part then
-                local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-                if onScreen then
-                    local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
-                    if d <= TrigSettings.FOVRadius and d < bestD then
-                        hitPlr, hitPart, bestD = plr, part, d
-                    end
-                end
-            end
         end
+        _trigHitPlr, _trigHitPart = hitPlr, hitPart
     end
+    local hitPlr, hitPart = _trigHitPlr, _trigHitPart
+    -- drop a stale cached target if its character/part went away
+    if hitPart and not hitPart.Parent then hitPlr, hitPart = nil, nil; _trigHitPlr, _trigHitPart = nil, nil end
     _trigCurrentPart = hitPart
 
     if TB_targetBox then

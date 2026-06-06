@@ -403,20 +403,31 @@ function library:CreateKeybindList(titleText)
         end
     end
 
+    -- a key counts as "unbound" (hidden from the list) when it's blank or a
+    -- sentinel -- this is what setting a bind to \ or Esc produces
+    local function isBound(k)
+        return k ~= nil and k ~= "" and k ~= "None" and k ~= "Unknown"
+    end
+
     local conn
     conn = RunService.Heartbeat:Connect(function()
         if library.Unloaded then conn:Disconnect(); return end
         local kb = library.keybinds or {}
-        local n = #kb
+        -- only show keybinds that are actually bound to a key
+        local shown = {}
+        for _, data in ipairs(kb) do
+            local okk, key = pcall(data.getKey)
+            if okk and isBound(key) then shown[#shown + 1] = { data = data, key = key } end
+        end
+        local n = #shown
         if n == 0 then edge.Visible = false; return end
         edge.Visible = true
         if #entries ~= n then rebuild(n) end
         for i = 1, n do
-            local data, lbl = kb[i], entries[i]
-            if data and lbl then
-                local okk, key = pcall(data.getKey)
-                local oko, on  = pcall(data.isOn)
-                lbl.Text = string.format("[%s] %s", okk and tostring(key) or "?", tostring(data.name))
+            local item, lbl = shown[i], entries[i]
+            if item and lbl then
+                local oko, on = pcall(item.data.isOn)
+                lbl.Text = string.format("[%s] %s", tostring(item.key), tostring(item.data.name))
                 lbl.TextColor3 = (oko and on) and library.accentColor or Color3.fromRGB(160, 160, 160)
             end
         end
@@ -2126,9 +2137,15 @@ function library:Init(key)
                     keybindButtonLabel.Text = ". . ."
                     local InputWait = UserInputService.InputBegan:wait()
                     if UserInputService.WindowFocused and InputWait.KeyCode.Name ~= "Unknown" then
-                        local Result = Shortcuts[InputWait.KeyCode.Name] or InputWait.KeyCode.Name
-                        keybindButtonLabel.Text = Result
-                        ChosenKey = InputWait.KeyCode.Name
+                        local keyName = InputWait.KeyCode.Name
+                        if keyName == "BackSlash" or keyName == "Escape" then
+                            -- \ or Esc clears the bind (and drops it from the keybind list)
+                            ChosenKey = ""
+                            keybindButtonLabel.Text = "None"
+                        else
+                            keybindButtonLabel.Text = Shortcuts[keyName] or keyName
+                            ChosenKey = keyName
+                        end
                     end
                 end)
     
@@ -2181,7 +2198,7 @@ function library:Init(key)
                 table.insert(library.keybinds, {
                     name   = displayName or text,
                     getKey = function() return ChosenKey end,
-                    setKey = function(k) if type(k) == "string" then ChosenKey = k; keybindButtonLabel.Text = k end end,
+                    setKey = function(k) if type(k) == "string" then ChosenKey = k; keybindButtonLabel.Text = (k == "" and "None") or k end end,
                     isOn   = function() return On end,
                 })
 
@@ -2360,9 +2377,15 @@ function library:Init(key)
                 keybindButtonLabel.Text = "..."
                 local InputWait = UserInputService.InputBegan:wait()
                 if UserInputService.WindowFocused and InputWait.KeyCode.Name ~= "Unknown" then
-                    local Result = Shortcuts[InputWait.KeyCode.Name] or InputWait.KeyCode.Name
-                    keybindButtonLabel.Text = Result
-                    ChosenKey = InputWait.KeyCode.Name
+                    local keyName = InputWait.KeyCode.Name
+                    if keyName == "BackSlash" or keyName == "Escape" then
+                        -- \ or Esc clears the bind (and drops it from the keybind list)
+                        ChosenKey = ""
+                        keybindButtonLabel.Text = "None"
+                    else
+                        keybindButtonLabel.Text = Shortcuts[keyName] or keyName
+                        ChosenKey = keyName
+                    end
                 end
             end)
 
@@ -2370,9 +2393,15 @@ function library:Init(key)
                 keybindButtonLabel.Text = ". . ."
                 local InputWait = UserInputService.InputBegan:wait()
                 if UserInputService.WindowFocused and InputWait.KeyCode.Name ~= "Unknown" then
-                    local Result = Shortcuts[InputWait.KeyCode.Name] or InputWait.KeyCode.Name
-                    keybindButtonLabel.Text = Result
-                    ChosenKey = InputWait.KeyCode.Name
+                    local keyName = InputWait.KeyCode.Name
+                    if keyName == "BackSlash" or keyName == "Escape" then
+                        -- \ or Esc clears the bind (and drops it from the keybind list)
+                        ChosenKey = ""
+                        keybindButtonLabel.Text = "None"
+                    else
+                        keybindButtonLabel.Text = Shortcuts[keyName] or keyName
+                        ChosenKey = keyName
+                    end
                 end
             end)
 
@@ -2394,7 +2423,7 @@ function library:Init(key)
             table.insert(library.keybinds, {
                 name   = text,
                 getKey = function() return ChosenKey end,
-                setKey = function(k) if type(k) == "string" then ChosenKey = k; keybindButtonLabel.Text = k end end,
+                setKey = function(k) if type(k) == "string" then ChosenKey = k; keybindButtonLabel.Text = (k == "" and "None") or k end end,
             })
 
             local KeybindFunctions = {}

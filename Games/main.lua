@@ -10,7 +10,9 @@ local Notif   = ctx.notif
 
 local HttpService = game:GetService("HttpService")
 
+local muteNotifs = false   -- toggled in Settings; set from saved settings on load
 local function notify(text, dur, kind)
+    if muteNotifs then return end
     if Notif then pcall(function() Notif:Notify(text, dur or 4, kind or "information") end) end
 end
 
@@ -576,6 +578,7 @@ end)
 -- ============================================================
 local settings = readJSON(SETTINGS_PATH) or {}
 local function saveSettings() writeJSON(SETTINGS_PATH, settings) end
+muteNotifs = settings.muteNotifs == true
 
 local Settings = Window:NewTab("Settings")
 Settings:NewSection("Appearance (universal, autosaved)")
@@ -603,6 +606,9 @@ Settings:NewToggle("Watermark", settings.watermark ~= false, function(v)
 end)
 Settings:NewToggle("Keybind list", settings.keybinds ~= false, function(v)
     library:SetKeybindListVisible(v); settings.keybinds = v; saveSettings()
+end)
+Settings:NewToggle("Mute notifications", settings.muteNotifs == true, function(v)
+    muteNotifs = v; settings.muteNotifs = v; saveSettings()
 end)
 
 Settings:NewSection("Menu")
