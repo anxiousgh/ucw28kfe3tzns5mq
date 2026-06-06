@@ -27,6 +27,11 @@ local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
 local LocalPlayer  = Players.LocalPlayer
 
+-- decay's knock check: workspace.Players.Characters[name].BodyEffects["K.O"]
+-- (or grabbed). Skip these when knock-check is on.
+local isKnocked = hc.isKnocked or function() return false end
+local knockCheckOn = false
+
 -- ---------- shared targeting helpers ----------
 local function myRoot() return hook.utils.getRoot() end
 -- line-of-sight origin = our HEAD (not the camera; in 3rd person the camera
@@ -169,6 +174,7 @@ task.spawn(function()
                     if p ~= LocalPlayer and not excl[p] then
                         local hrp, ch = aliveParts(p)
                         if hrp and (hrp.Position - root.Position).Magnitude <= killAuraRange
+                            and ((not knockCheckOn) or not isKnocked(p))
                             and isVisible(headPos(), hrp, ch) then
                             rb.addTarget(p)
                         end
@@ -179,6 +185,15 @@ task.spawn(function()
         task.wait(0.2)
     end
 end)
+
+-- Visualization: ragebot target line + outline for the locked target
+Target:NewSection("Visualization")
+rb.setShowLine(false); rb.setShowOutline(false)   -- off until enabled
+regToggle(Target, "HC_ShowLine", "Target line", false, function(v) rb.setShowLine(v) end)
+regColor(Target, "HC_LineColor", "Line color", Color3.fromRGB(255, 60, 60), function(c) rb.setLineColor(c) end)
+regDropdown(Target, "HC_LineOrigin", "Line origin", "Bottom", { "Bottom", "Center", "Top", "Mouse" }, false, function(v) rb.setLineOrigin(v) end)
+regToggle(Target, "HC_ShowOutline", "Target outline", false, function(v) rb.setShowOutline(v) end)
+regColor(Target, "HC_OutlineColor", "Outline color", Color3.fromRGB(255, 80, 80), function(c) rb.setOutlineColor(c) end)
 
 -- ============================================================
 --  COMBAT
@@ -216,16 +231,29 @@ regDropdown(Combat, "HC_FHSoundId", "Hit sound", "crit", soundLabels, false, fun
 end)
 regDecimal(Combat, "HC_FHSoundVol", "Hit sound volume", "", 0, 3, 1, 10, function(v) hc.forceHit.setHitSoundVolume(v) end)
 
--- Auto Shoot: force-hits the nearest visible enemy on a cadence
+-- Auto Shoot: force-hits LOCKED targets (from the Target tab) that are in
+-- range, visible (head LOS) and not knocked. Only people you've targeted.
 Combat:NewSection("Auto Shoot")
 local autoOn, autoRange, autoCooldown = false, 200, 0.15
-regToggle(Combat, "HC_AutoShoot", "Auto shoot (anyone visible)", false, function(v) autoOn = v end)
+regToggle(Combat, "HC_AutoShoot", "Auto shoot (targets only)", false, function(v) autoOn = v end)
 regSlider(Combat, "HC_AutoShootRange", "Range", "", { min = 10, max = 1000, default = 200 }, function(v) autoRange = v end)
 regDecimal(Combat, "HC_AutoShootCooldown", "Cooldown", "s", 0.05, 1, 0.15, 100, function(v) autoCooldown = v end)
+local function pickShootTarget()
+    local root = myRoot(); if not root then return nil end
+    for _, p in ipairs(rb.getTargetList()) do
+        local hrp, ch = aliveParts(p)
+        if hrp and (hrp.Position - root.Position).Magnitude <= autoRange then
+            if (not knockCheckOn) or not isKnocked(p) then
+                if isVisible(headPos(), hrp, ch) then return p end
+            end
+        end
+    end
+    return nil
+end
 task.spawn(function()
     while not library.Unloaded do
         if autoOn then
-            local p = nearestEnemy(autoRange, true)
+            local p = pickShootTarget()
             if p then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
         end
         task.wait(math.max(0.03, autoCooldown))
@@ -284,7 +312,7 @@ regDecimal(Combat, "HC_ReloadCooldown", "Cooldown", "s", 0, 5, hc.autoReload.get
 -- ============================================================
 local Checks = Window:NewTab("Checks")
 Checks:NewSection("Knock check")
-regToggle(Checks, "HC_KnockCheck", "Skip knocked players", false, function(v) rb.setSkipKnocked(v) end)
+regToggle(Checks, "HC_KnockCheck", "Skip knocked players", false, function(v) knockCheckOn = v; rb.setSkipKnocked(v) end)
 
 Checks:NewSection("Visible check")
 regToggle(Checks, "HC_StrictVis", "Strict (block see-through walls)", false, function(v) hook.utils.setStrictVisibleCheck(v) end)
