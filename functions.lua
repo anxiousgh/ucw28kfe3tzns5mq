@@ -1834,6 +1834,22 @@ if Drawing and Drawing.new then
     TB_targetBox.Thickness=1; TB_targetBox.Filled=true; TB_targetBox.Radius=4; TB_targetBox.NumSides=32
 end
 
+-- map a chosen part name to the equivalent on the OTHER rig, so picking an
+-- R15 name on an R6 character (or vice versa) still resolves to a real part
+-- instead of silently falling back to HumanoidRootPart ("uses the default")
+local _PART_EQUIV = {
+    -- R15 name -> R6 name
+    UpperTorso = "Torso", LowerTorso = "Torso",
+    LeftUpperArm = "Left Arm", LeftLowerArm = "Left Arm", LeftHand = "Left Arm",
+    RightUpperArm = "Right Arm", RightLowerArm = "Right Arm", RightHand = "Right Arm",
+    LeftUpperLeg = "Left Leg", LeftLowerLeg = "Left Leg", LeftFoot = "Left Leg",
+    RightUpperLeg = "Right Leg", RightLowerLeg = "Right Leg", RightFoot = "Right Leg",
+    -- R6 name -> R15 name
+    Torso = "UpperTorso",
+    ["Left Arm"] = "LeftUpperArm", ["Right Arm"] = "RightUpperArm",
+    ["Left Leg"] = "LeftUpperLeg", ["Right Leg"] = "RightUpperLeg",
+}
+
 -- pick the target part by name, with R6/R15 friendly fallbacks
 local function tbResolvePart(char, name)
     if not char then return nil end
@@ -1845,7 +1861,17 @@ local function tbResolvePart(char, name)
         if #parts == 0 then return char:FindFirstChild("HumanoidRootPart") end
         return parts[math.random(1, #parts)]
     end
-    return char:FindFirstChild(name) or char:FindFirstChild("HumanoidRootPart")
+    -- exact match first
+    local p = char:FindFirstChild(name)
+    if p and p:IsA("BasePart") then return p end
+    -- try the other-rig equivalent (e.g. UpperTorso <-> Torso)
+    local alt = _PART_EQUIV[name]
+    if alt then
+        p = char:FindFirstChild(alt)
+        if p and p:IsA("BasePart") then return p end
+    end
+    -- last resort
+    return char:FindFirstChild("HumanoidRootPart")
 end
 
 local function trigIsVisible(plr)
