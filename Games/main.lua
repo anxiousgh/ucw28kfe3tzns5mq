@@ -44,10 +44,10 @@ local AUTOLOAD_PATH = ROOT .. "/autoload.json"
 -- (gets its OWN config system named after it) only if listed here.
 -- Every other game uses the universal config system. The two never mix.
 local GAMES = {
-    ["155615604"]  = "Prison Life",
-    ["142823291"]  = "Murder Mystery 2",
-    -- ["2788229376"] = "Hood Customs",
-    -- ["286090429"]  = "Minesweeper",
+    ["155615604"]     = "Prison Life",
+    ["142823291"]     = "Murder Mystery 2",
+    ["138995385694035"] = "Hood Customs",
+    ["9825515356"]      = "Hood Customs",
 }
 local supportedName = GAMES[placeId]   -- nil => unsupported => universal configs
 
@@ -132,6 +132,37 @@ local function regDropdown(tab, key, text, default, list, multi, cb)
     return h
 end
 
+-- colour presets + colour-picker / decimal-slider helpers
+local COLORS = {
+    White  = Color3.fromRGB(255, 255, 255), Red    = Color3.fromRGB(255, 60, 60),
+    Green  = Color3.fromRGB(80, 255, 80),   Blue   = Color3.fromRGB(80, 150, 255),
+    Purple = Color3.fromRGB(232, 158, 255), Cyan   = Color3.fromRGB(90, 230, 230),
+    Yellow = Color3.fromRGB(255, 230, 90),  Orange = Color3.fromRGB(255, 150, 70),
+    Gray   = Color3.fromRGB(120, 120, 120), Black  = Color3.fromRGB(0, 0, 0),
+}
+-- HSV colour picker (NewColorpicker); config-saved as a hex string.
+-- `default` may be a Color3 or a COLORS preset name.
+local function regColor(tab, key, text, default, apply)
+    local defaultColor = (typeof(default) == "Color3") and default or (COLORS[default] or COLORS.White)
+    flags[key] = defaultColor:ToHex()
+    local h = tab:NewColorpicker(text, defaultColor, function(c)
+        flags[key] = c:ToHex()
+        apply(c)
+    end)
+    controls[key] = { set = function(hex)
+        if type(hex) ~= "string" then return end
+        local ok, col = pcall(Color3.fromHex, hex)
+        if ok and typeof(col) == "Color3" then flags[key] = hex; h:Set(col) end
+    end }
+    return h
+end
+-- Xsx slider is integer-only; present an int range, apply value/scale.
+local function regDecimal(tab, key, text, suffix, dmin, dmax, ddefault, scale, apply)
+    regSlider(tab, key, text, suffix,
+        { min = math.floor(dmin * scale), max = math.floor(dmax * scale), default = math.floor(ddefault * scale) },
+        function(v) apply(v / scale) end)
+end
+
 -- Expose backend + registry helpers so universal / per-game modules can add
 -- tabs that integrate with configs, autoload and unload (active-tracking).
 ctx.api = {
@@ -140,6 +171,8 @@ ctx.api = {
     regToggle   = regToggle,
     regSlider   = regSlider,
     regDropdown = regDropdown,
+    regColor    = regColor,
+    regDecimal  = regDecimal,
 }
 
 -- The shared tabs (Movement/Misc/Settings/Config) build ON DEMAND so a
@@ -249,37 +282,7 @@ regSlider(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", { min = 1, ma
 regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
 regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
 
--- ---------- shared helpers for Visuals / World ----------
-local COLOR_NAMES = { "White", "Red", "Green", "Blue", "Purple", "Cyan", "Yellow", "Orange", "Gray", "Black" }
-local COLORS = {
-    White  = Color3.fromRGB(255, 255, 255), Red    = Color3.fromRGB(255, 60, 60),
-    Green  = Color3.fromRGB(80, 255, 80),   Blue   = Color3.fromRGB(80, 150, 255),
-    Purple = Color3.fromRGB(232, 158, 255), Cyan   = Color3.fromRGB(90, 230, 230),
-    Yellow = Color3.fromRGB(255, 230, 90),  Orange = Color3.fromRGB(255, 150, 70),
-    Gray   = Color3.fromRGB(120, 120, 120), Black  = Color3.fromRGB(0, 0, 0),
-}
--- HSV colour picker (library NewColorpicker); config-saved as a hex string.
--- `default` may be a Color3 or a COLORS preset name.
-local function regColor(tab, key, text, default, apply)
-    local defaultColor = (typeof(default) == "Color3") and default or (COLORS[default] or COLORS.White)
-    flags[key] = defaultColor:ToHex()
-    local h = tab:NewColorpicker(text, defaultColor, function(c)
-        flags[key] = c:ToHex()
-        apply(c)
-    end)
-    controls[key] = { set = function(hex)
-        if type(hex) ~= "string" then return end
-        local ok, col = pcall(Color3.fromHex, hex)
-        if ok and typeof(col) == "Color3" then flags[key] = hex; h:Set(col) end
-    end }
-    return h
-end
--- Xsx slider is integer-only; this presents an int range and applies value/scale.
-local function regDecimal(tab, key, text, suffix, dmin, dmax, ddefault, scale, apply)
-    regSlider(tab, key, text, suffix,
-        { min = math.floor(dmin * scale), max = math.floor(dmax * scale), default = math.floor(ddefault * scale) },
-        function(v) apply(v / scale) end)
-end
+-- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
 -- ============================================================
 --  VISUALS
