@@ -45,6 +45,7 @@ local AUTOLOAD_PATH = ROOT .. "/autoload.json"
 -- Every other game uses the universal config system. The two never mix.
 local GAMES = {
     ["155615604"]  = "Prison Life",
+    ["142823291"]  = "Murder Mystery 2",
     -- ["2788229376"] = "Hood Customs",
     -- ["286090429"]  = "Minesweeper",
 }
