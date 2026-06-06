@@ -8,8 +8,7 @@ local library = ctx.library
 local Window  = ctx.window
 local Notif   = ctx.notif
 
-local HttpService        = game:GetService("HttpService")
-local MarketplaceService = game:GetService("MarketplaceService")
+local HttpService = game:GetService("HttpService")
 
 local function notify(text, dur, kind)
     if Notif then pcall(function() Notif:Notify(text, dur or 4, kind or "information") end) end
@@ -40,6 +39,16 @@ local placeId   = tostring(ctx.gameKey or "0")
 local GAME_DIR  = CFG_ROOT .. "/games/" .. placeId
 local SETTINGS_PATH = ROOT .. "/settings.json"
 local AUTOLOAD_PATH = ROOT .. "/autoload.json"
+
+-- Supported games: PlaceId (string) -> display name. A game is "supported"
+-- (gets its OWN config system named after it) only if listed here.
+-- Every other game uses the universal config system. The two never mix.
+local GAMES = {
+    -- ["2788229376"] = "Hood Customs",
+    -- ["155615604"]  = "Prison Life",
+    -- ["286090429"]  = "Minesweeper",
+}
+local supportedName = GAMES[placeId]   -- nil => unsupported => universal configs
 
 local function ensureFolder(path)
     if typeof(makefolder) == "function" and typeof(isfolder) == "function" then
@@ -241,6 +250,11 @@ Settings:NewSlider("UI scale", "%", false, "/", { min = 50, max = 150, default =
     library:SetScale(v / 100); settings.scale = v; saveSettings()
 end)
 
+Settings:NewSection("Menu")
+Settings:NewButton("Unload witherhook", function()
+    library:Remove()
+end)
+
 -- ============================================================
 --  CONFIG  (universal + per-game, save/load/delete/autoload)
 -- ============================================================
@@ -285,61 +299,46 @@ end
 
 local Config = Window:NewTab("Config")
 
--- resolve this game's display name (best effort)
-local gameName = "Game " .. placeId
-pcall(function()
-    local info = MarketplaceService:GetProductInfo(tonumber(placeId))
-    if info and info.Name then gameName = info.Name end
-end)
-
--- ---------- Universal configs ----------
-Config:NewSection("Universal configs (all games)")
-local uniNameVal, uniSel = "", nil
-Config:NewTextbox("New universal config name", "", "name", "all", "medium", true, false, function(v) uniNameVal = v end)
-local uniList = Config:NewDropdown("Saved universal configs", "—", listConfigs(UNI_DIR), false, function(v) uniSel = v end)
-local uniAutoLabel = Config:NewLabel("Autoload: " .. tostring(autoload.universal or "none"), "left")
-
-local function refreshUni()
-    local list = listConfigs(UNI_DIR)
-    if #list == 0 then list = { "—" } end
-    uniList:SetOptions(list)
-    uniAutoLabel:Text("Autoload: " .. tostring(autoload.universal or "none"))
+-- One config system, chosen by support status:
+--   supported game  -> game configs (named after the game), no universal
+--   unsupported     -> universal configs only
+local CFG_DIR, sectionTitle, getAuto, setAuto, clearAuto
+if supportedName then
+    CFG_DIR      = GAME_DIR
+    sectionTitle = supportedName .. " — Configs"
+    getAuto      = function() return autoload.games[placeId] end
+    setAuto      = function(n) autoload.games[placeId] = n end
+    clearAuto    = function() autoload.games[placeId] = false end
+else
+    CFG_DIR      = UNI_DIR
+    sectionTitle = "Universal Configs (unsupported game)"
+    getAuto      = function() return autoload.universal end
+    setAuto      = function(n) autoload.universal = n end
+    clearAuto    = function() autoload.universal = false end
 end
 
-Config:NewButton("Save universal", function() saveConfig(UNI_DIR, uniNameVal); refreshUni() end)
-:AddButton("Load universal", function() loadConfig(UNI_DIR, uniSel) end)
-Config:NewButton("Delete universal", function() deleteConfig(UNI_DIR, uniSel); refreshUni() end)
-:AddButton("Refresh", function() refreshUni() end)
-Config:NewButton("Set autoload (universal)", function()
-    if uniSel and uniSel ~= "—" then autoload.universal = uniSel; saveAutoload(); refreshUni(); notify("Autoload set: " .. uniSel, 3, "success") end
-end)
-:AddButton("Clear autoload (universal)", function()
-    autoload.universal = false; saveAutoload(); refreshUni(); notify("Universal autoload cleared", 3, "information")
-end)
+Config:NewSection(sectionTitle)
+local cfgNameVal, cfgSel = "", nil
+Config:NewTextbox("New config name", "", "name", "all", "medium", true, false, function(v) cfgNameVal = v end)
+local cfgListD   = Config:NewDropdown("Saved configs", "—", listConfigs(CFG_DIR), false, function(v) cfgSel = v end)
+local cfgAutoLbl = Config:NewLabel("Autoload: " .. tostring(getAuto() or "none"), "left")
 
--- ---------- Game configs ----------
-Config:NewSection("Game configs — " .. gameName)
-local gameNameVal, gameSel = "", nil
-Config:NewTextbox("New game config name", "", "name", "all", "medium", true, false, function(v) gameNameVal = v end)
-local gameListD = Config:NewDropdown("Saved game configs", "—", listConfigs(GAME_DIR), false, function(v) gameSel = v end)
-local gameAutoLabel = Config:NewLabel("Autoload: " .. tostring(autoload.games[placeId] or "none"), "left")
-
-local function refreshGame()
-    local list = listConfigs(GAME_DIR)
+local function refreshCfg()
+    local list = listConfigs(CFG_DIR)
     if #list == 0 then list = { "—" } end
-    gameListD:SetOptions(list)
-    gameAutoLabel:Text("Autoload: " .. tostring(autoload.games[placeId] or "none"))
+    cfgListD:SetOptions(list)
+    cfgAutoLbl:Text("Autoload: " .. tostring(getAuto() or "none"))
 end
 
-Config:NewButton("Save game", function() saveConfig(GAME_DIR, gameNameVal); refreshGame() end)
-:AddButton("Load game", function() loadConfig(GAME_DIR, gameSel) end)
-Config:NewButton("Delete game", function() deleteConfig(GAME_DIR, gameSel); refreshGame() end)
-:AddButton("Refresh", function() refreshGame() end)
-Config:NewButton("Set autoload (game)", function()
-    if gameSel and gameSel ~= "—" then autoload.games[placeId] = gameSel; saveAutoload(); refreshGame(); notify("Game autoload set: " .. gameSel, 3, "success") end
+Config:NewButton("Save", function() saveConfig(CFG_DIR, cfgNameVal); refreshCfg() end)
+:AddButton("Load", function() loadConfig(CFG_DIR, cfgSel) end)
+Config:NewButton("Delete", function() deleteConfig(CFG_DIR, cfgSel); refreshCfg() end)
+:AddButton("Refresh", function() refreshCfg() end)
+Config:NewButton("Set autoload", function()
+    if cfgSel and cfgSel ~= "—" then setAuto(cfgSel); saveAutoload(); refreshCfg(); notify("Autoload set: " .. cfgSel, 3, "success") end
 end)
-:AddButton("Clear autoload (game)", function()
-    autoload.games[placeId] = false; saveAutoload(); refreshGame(); notify("Game autoload cleared", 3, "information")
+:AddButton("Clear autoload", function()
+    clearAuto(); saveAutoload(); refreshCfg(); notify("Autoload cleared", 3, "information")
 end)
 
 -- ============================================================
@@ -350,12 +349,8 @@ library:SetFont(settings.font or "Code")
 library:SetScale((settings.scale or 100) / 100)
 
 task.defer(function()
-    local gName = autoload.games[placeId]
-    if gName and gName ~= false then
-        loadConfig(GAME_DIR, gName)
-    elseif autoload.universal and autoload.universal ~= false then
-        loadConfig(UNI_DIR, autoload.universal)
-    end
+    local n = getAuto()
+    if n and n ~= false then loadConfig(CFG_DIR, n) end
 end)
 
 notify("witherhook ready", 3, "success")
