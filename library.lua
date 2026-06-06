@@ -1838,11 +1838,10 @@ function library:Init(key)
                     end
                 end)
     
-                local ChatTextBox = Player.PlayerGui.Chat.Frame.ChatBarParentFrame.Frame.BoxFrame.Frame.ChatBar
                 if UserInputService.WindowFocused then
                     UserInputService.InputBegan:Connect(function(c, p)
                         if not p then
-                            if c.KeyCode.Name == ChosenKey and not ChatTextBox:IsFocused() then
+                            if c.KeyCode.Name == ChosenKey and not UserInputService:GetFocusedTextBox() then
                                 On = not On
                                 local SizeOn = On and UDim2.new(0, 12, 0, 12) or UDim2.new(0, 0, 0, 0)
                                 local Transparency = On and 0 or 1
@@ -2072,11 +2071,10 @@ function library:Init(key)
                 end
             end)
 
-            local ChatTextBox = Player.PlayerGui.Chat.Frame.ChatBarParentFrame.Frame.BoxFrame.Frame.ChatBar
             if UserInputService.WindowFocused then
                 UserInputService.InputBegan:Connect(function(c, p)
                     if not p then
-                        if c.KeyCode.Name == ChosenKey and not ChatTextBox:IsFocused() then
+                        if c.KeyCode.Name == ChosenKey and not UserInputService:GetFocusedTextBox() then
                             callback(ChosenKey)
                             return
                         end
