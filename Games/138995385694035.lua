@@ -110,15 +110,12 @@ regDropdown(Target, "HC_TargetMode", "Priority", "Closest", { "Closest", "Mouse"
     pcall(rb.setPriority, v)
 end)
 
+-- Add-target ALWAYS picks the player closest to the mouse (independent of
+-- the priority mode, which only controls which locked target is active).
 local function addClosestTarget()
     local excl = {}
     for _, t in ipairs(rb.getTargetList()) do excl[t] = true end
-    local p
-    if targetMode == "Mouse" then
-        p = hook.utils.findClosestPlayer({ fov = 9999, exclude = excl })
-    else
-        p = nearestEnemy(nil, false, excl)
-    end
+    local p = hook.utils.findClosestPlayer({ fov = 9999, exclude = excl })
     if p then rb.addTarget(p); notify("Locked " .. p.Name, 2, "success")
     else notify("No target found", 2, "alert") end
 end
