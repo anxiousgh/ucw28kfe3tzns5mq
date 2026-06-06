@@ -255,6 +255,12 @@ local function torsoOf(ch)
     return ch and (ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("Torso") or ch:FindFirstChild("HumanoidRootPart"))
 end
 
+-- true if the player currently has spawn protection (a ForceField)
+local function inForceField(plr)
+    local ch = plr and plr.Character
+    return ch ~= nil and ch:FindFirstChildOfClass("ForceField") ~= nil
+end
+
 -- TP shoot: equip DB -> save spot -> TP to target (upright) -> force-hit -> TP back ~1s
 local function tpShoot()
     if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
@@ -498,7 +504,8 @@ task.spawn(function()
         if autoOn then
             -- highest-priority locked target in range + visible, skipping knocked
             local p = bestTarget(knockCheckOn or ignoreKnockedOn, true, autoRange)
-            if p then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
+            -- don't shoot players under spawn protection (ForceField)
+            if p and not inForceField(p) then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
         end
         task.wait(math.max(0.03, autoCooldown))
     end
