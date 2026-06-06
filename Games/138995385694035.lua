@@ -213,6 +213,39 @@ task.spawn(function()
     end
 end)
 
+-- ---------- Target actions (operate on the active locked target) ----------
+Target:NewSection("Target actions")
+local function activeTarget() return bestTarget(false, false, nil) end
+
+-- TP shoot: save spot -> TP to target -> force-hit -> TP back ~1s later
+local function tpShoot()
+    local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
+    local lc   = LocalPlayer.Character
+    local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+    local thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+    if not lhrp or not thrp then return end
+    local saved    = lhrp.CFrame
+    local wasActive = (hc.forceHit.isActive and hc.forceHit.isActive()) or false
+    hc.forceHit.setTarget(tgt)
+    if not wasActive then hc.forceHit.start() end
+    lhrp.CFrame = thrp.CFrame * CFrame.new(0, 0, 4)
+    task.wait(0.12)
+    pcall(hc.forceHit.fire)
+    task.spawn(function()
+        task.wait(1)
+        if lhrp and lhrp.Parent then lhrp.CFrame = saved end
+        if not wasActive then hc.forceHit.stop() end
+    end)
+end
+
+local function gotoTarget()
+    local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
+    pcall(function() hook.players["goto"](tgt) end)
+end
+
+Target:NewButton("TP shoot", tpShoot)
+    :AddButton("Goto", gotoTarget)
+
 -- Visualization: ragebot target line + outline for the locked target
 Target:NewSection("Visualization")
 rb.setShowLine(false); rb.setShowOutline(false)   -- off until enabled
@@ -274,10 +307,11 @@ do
         if not hud.Enabled then return end
         local tgt = bestTarget(false, false, nil)   -- highest-priority locked target
         if not tgt then
-            displayLbl.Text = "No target"; stateLbl.Text = ""; hpText.Text = ""; distLbl.Text = ""; toolLbl.Text = ""
-            hpFill.Size = UDim2.new(0, 0, 1, 0); lastUserId = nil; avatar.Image = ""
+            -- only show the HUD when there's an actual target
+            edge.Visible = false; lastUserId = nil
             return
         end
+        edge.Visible = true
         if tgt.UserId ~= lastUserId then
             lastUserId = tgt.UserId
             task.spawn(function()

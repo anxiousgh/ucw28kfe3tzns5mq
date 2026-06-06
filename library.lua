@@ -1156,6 +1156,8 @@ function library:Init(key)
                     end
                 end
                 if d.Visible then fadeWalk(d, hide) end   -- skip hidden subtrees
+            elseif d:IsA("Folder") then
+                fadeWalk(d, hide)   -- sliders/keybinds nest parts in Folders
             end
         end
     end
