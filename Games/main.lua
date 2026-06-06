@@ -336,6 +336,9 @@ regDropdown(Visuals, "BodyMaterialKind", "Material", "Neon", { "Neon", "ForceFie
 regColor(Visuals, "BodyMaterialColor", "Color", "Red", function(c) hook.bodyMaterial.setColor(c) end)
 regDecimal(Visuals, "BodyMaterialTransp", "Transparency", "%", 0, 1, 0, 100, function(v) hook.bodyMaterial.setTransparency(v) end)
 
+Visuals:NewSection("Camera")
+regToggle(Visuals, "UnlockZoom", "Unlock zoom", false, function(v) if v then hook.zoom.start() else hook.zoom.stop() end end)
+
 -- ============================================================
 --  WORLD
 -- ============================================================
@@ -404,7 +407,6 @@ regDecimal(World, "SunRaysSpread", "Spread", "%", 0, 1, 1, 100, function(v) SunR
 World:NewSection("Camera")
 regToggle(World, "Freecam", "Freecam", false, function(v) if v then hook.freecam.start() else hook.freecam.stop() end end)
     :AddKeybind(Enum.KeyCode.L, "Freecam Toggle")
-regToggle(World, "Zoom", "Extended zoom", false, function(v) if v then hook.zoom.start() else hook.zoom.stop() end end)
 regSlider(World, "Fov", "FOV", "", { min = 30, max = 120, default = math.floor(hook.fov.get() or 70) }, function(v) hook.fov.set(v) end)
 
 -- ============================================================
