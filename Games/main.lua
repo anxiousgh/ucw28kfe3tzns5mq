@@ -288,20 +288,33 @@ local Visuals = Window:NewTab("Visuals")
 Visuals:NewSection("ESP")
 regToggle(Visuals, "EspEnabled", "Enabled", false, function(v) if v then hook.esp.start() else hook.esp.stop() end end)
     :AddKeybind(Enum.KeyCode.M, "ESP Toggle")
-regToggle(Visuals, "EspBox", "Boxes", false, function(v) hook.esp.setBox(v) end)
+
+-- all the on/off ESP elements collapsed into one multi-select dropdown
+local ESP_ELEMENTS = {
+    { "Boxes",         hook.esp.setBox },
+    { "Names",         hook.esp.setNames },
+    { "Health bars",   hook.esp.setHealth },
+    { "Health number", hook.esp.setHealthNum },
+    { "Distance",      hook.esp.setDistance },
+    { "Tracers",       hook.esp.setTracer },
+    { "Skeleton",      hook.esp.setSkeleton },
+    { "Held item",     hook.esp.setHeldItem },
+    { "Team colors",   hook.esp.setTeamCheck },
+    { "Chams",         hook.esp.setChams },
+    { "Self ESP",      hook.esp.setSelf },
+}
+local ESP_NAMES = {}
+for _, e in ipairs(ESP_ELEMENTS) do ESP_NAMES[#ESP_NAMES + 1] = e[1] end
+regDropdown(Visuals, "EspElements", "ESP elements", nil, ESP_NAMES, true, function(picked)
+    local sel = {}
+    if type(picked) == "table" then for _, n in ipairs(picked) do sel[n] = true end end
+    for _, e in ipairs(ESP_ELEMENTS) do e[2](sel[e[1]] == true) end
+end)
+
+-- style sub-options (not on/off, so kept as their own dropdowns)
 regDropdown(Visuals, "EspBoxStyle", "Box style", "Corners", { "Corners", "Full" }, false, function(v) hook.esp.setBoxStyle(v) end)
-regToggle(Visuals, "EspNames", "Names", false, function(v) hook.esp.setNames(v) end)
-regToggle(Visuals, "EspHealth", "Health bars", false, function(v) hook.esp.setHealth(v) end)
-regToggle(Visuals, "EspHealthNum", "Health number", false, function(v) hook.esp.setHealthNum(v) end)
-regToggle(Visuals, "EspDistance", "Distance", false, function(v) hook.esp.setDistance(v) end)
-regToggle(Visuals, "EspTracer", "Tracers", false, function(v) hook.esp.setTracer(v) end)
 regDropdown(Visuals, "EspTracerOrigin", "Tracer origin", "Bottom", { "Bottom", "Center", "Top", "Mouse" }, false, function(v) hook.esp.setTracerOrigin(v) end)
-regToggle(Visuals, "EspSkeleton", "Skeleton", false, function(v) hook.esp.setSkeleton(v) end)
-regToggle(Visuals, "EspHeldItem", "Held item", false, function(v) hook.esp.setHeldItem(v) end)
-regToggle(Visuals, "EspTeamColors", "Team check", false, function(v) hook.esp.setTeamCheck(v) end)
-regToggle(Visuals, "EspChams", "Chams", false, function(v) hook.esp.setChams(v) end)
 regDropdown(Visuals, "EspChamsStyle", "Chams style", "Overlay", { "Overlay", "Occluded", "Outline" }, false, function(v) hook.esp.setChamsStyle(v) end)
-regToggle(Visuals, "EspSelf", "Self ESP", false, function(v) hook.esp.setSelf(v) end)
 
 Visuals:NewSection("ESP colors")
 regColor(Visuals, "EspEnemyColor",   "Enemy",         "Red",    function(c) hook.esp.setEnemyColor(c) end)
