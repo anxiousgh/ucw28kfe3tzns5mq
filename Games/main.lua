@@ -306,15 +306,26 @@ local function playerNameList()
 end
 local plrSel = nil
 local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v) plrSel = v end)
-PlayersTab:NewButton("Refresh players", function() plrDrop:SetOptions(playerNameList()) end)
 
--- auto-refresh the list when players join/leave
+-- rebuild the option list but keep the current pick selected if they're still
+-- here (SetOptions clears the selection, which was un-choosing players on every
+-- join/leave)
 local Players = game:GetService("Players")
 local function refreshPlayerList()
     if library.Unloaded then return end
-    plrDrop:SetOptions(playerNameList())
+    local prev  = plrSel
+    local names = playerNameList()
+    plrDrop:SetOptions(names)
+    if prev and prev ~= "(none)" then
+        for _, n in ipairs(names) do
+            if n == prev then plrDrop:Set(prev); break end
+        end
+    end
 end
-Players.PlayerAdded:Connect(refreshPlayerList)
+PlayersTab:NewButton("Refresh players", refreshPlayerList)
+
+-- auto-refresh the list when players join/leave
+Players.PlayerAdded:Connect(function() task.defer(refreshPlayerList) end)
 Players.PlayerRemoving:Connect(function() task.defer(refreshPlayerList) end)
 
 local function selectedPlayer()
@@ -329,6 +340,14 @@ PlayersTab:NewButton("Follow", function() local p = selectedPlayer(); if p then 
 PlayersTab:NewButton("View", function() local p = selectedPlayer(); if p then hook.players.view(p) end end)
     :AddButton("Goto", function() local p = selectedPlayer(); if p then hook.players["goto"](p) end end)
 PlayersTab:NewButton("Fling", function() local p = selectedPlayer(); if p then hook.players.fling(p) end end)
+    :AddButton("Sync emote", function()
+        local p = selectedPlayer(); if not p then return end
+        if hook.stickyEmote and hook.stickyEmote.syncWith(p) then
+            notify("Synced emote with " .. p.Name, 2, "success")
+        else
+            notify("No emote playing on " .. (p and p.Name or "?"), 2, "alert")
+        end
+    end)
 
 -- ============================================================
 --  VISUALS

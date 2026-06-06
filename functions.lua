@@ -1372,51 +1372,31 @@ local function followPlayer(plr)
             -- Close enough: direct walk, no pathfinding.
             if dToTarget < 8 then
                 pcall(function() hum:MoveTo(thrp.Position) end)
-                task.wait(0.15)
+                task.wait(0.1)
                 continue
             end
 
-            -- Pathfind, then walk through up to 6 waypoints before
-            -- recomputing (target may have moved a lot).
+            -- Recompute the path to the target's CURRENT position every 0.1s
+            -- and steer toward the next waypoint. Re-pathing this often keeps
+            -- us tight on a moving target instead of walking a stale path.
             local ok = pcall(function()
                 _follow.path:ComputeAsync(hrp.Position, thrp.Position)
             end)
             if ok and _follow.path.Status == Enum.PathStatus.Success then
                 _follow.waypoints = _follow.path:GetWaypoints()
-                vizRebuild()
-                for i = 2, math.min(#_follow.waypoints, 7) do
-                    if _follow.target ~= target then break end
-                    local hum2, hrp2 = _followGetLocal()
-                    if not hum2 or not hrp2 then break end
-                    local wp = _follow.waypoints[i]
-                    _follow.idx = i; vizRebuild()
+                _follow.idx = 2; vizRebuild()
+                local wp = _follow.waypoints[2]
+                if wp then
                     if wp.Action == Enum.PathWaypointAction.Jump then
-                        pcall(function() hum2.Jump = true end)
+                        pcall(function() hum.Jump = true end)
                     end
-                    pcall(function() hum2:MoveTo(wp.Position) end)
-                    -- Wait for arrival or 1.5s timeout (per waypoint).
-                    -- MoveToFinished can fire false if the humanoid gives
-                    -- up; either way we move to the next waypoint.
-                    local finished = false
-                    task.spawn(function()
-                        hum2.MoveToFinished:Wait()
-                        finished = true
-                    end)
-                    local waited = 0
-                    while not finished and waited < 1.5 and _follow.target == target do
-                        RunService.Heartbeat:Wait()
-                        waited = waited + (1/60)
-                    end
-                    -- Early-exit: if we're already near the actual target,
-                    -- stop walking the rest of the (now stale) path.
-                    local _, hrp3 = _followGetLocal()
-                    if hrp3 and (hrp3.Position - thrp.Position).Magnitude < 8 then break end
+                    pcall(function() hum:MoveTo(wp.Position) end)
                 end
+                task.wait(0.1)
             else
-                -- NoPath: try direct walk; if still stuck, the next
-                -- iteration recomputes.
+                -- NoPath: try direct walk; next iteration recomputes.
                 pcall(function() hum:MoveTo(thrp.Position) end)
-                task.wait(0.5)
+                task.wait(0.1)
             end
         end
         vizClear()
@@ -3162,11 +3142,49 @@ F.stickyEmote = (function()
             end
         end)
     end
+    -- Copy whatever emote `plr` is currently playing onto us and keep it
+    -- sticky. Reads the target's playing animation tracks, picks the first
+    -- that passes the emote filter, then drives our normal sticky machinery
+    -- with that AnimationId so the Heartbeat keep-alive loops it.
+    local function syncWith(plr)
+        local ch  = plr and plr.Character
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        local tAnimator = hum and hum:FindFirstChildOfClass("Animator")
+        if not tAnimator then return false end
+        local id
+        local ok, tracks = pcall(function() return tAnimator:GetPlayingAnimationTracks() end)
+        if ok and tracks then
+            for _, tr in ipairs(tracks) do
+                if shouldStick(tr) then
+                    local a = tr.Animation
+                    if a and a.AnimationId ~= "" then id = a.AnimationId; break end
+                end
+            end
+        end
+        if not id then return false end
+        if not G.stickyEmoteActive then startFn() end
+        G._emoteStopRequested = false
+        stopOurs()
+        G._currentEmoteId = id
+        local myAnimator = getAnimator()
+        if myAnimator then
+            local anim = Instance.new("Animation"); anim.AnimationId = id
+            local tr; pcall(function() tr = myAnimator:LoadAnimation(anim) end)
+            if tr then
+                pcall(function() tr.Priority = Enum.AnimationPriority.Action4 end)
+                pcall(function() tr:Play(0) end)
+                G._stickyTracks[tr] = true
+            end
+        end
+        return true
+    end
+
     return {
         start    = startFn,
         stop     = stopFn,
         toggle   = function() if G.stickyEmoteActive then stopFn() else startFn() end end,
         isActive = function() return G.stickyEmoteActive == true end,
+        syncWith = syncWith,
     }
 end)()
 

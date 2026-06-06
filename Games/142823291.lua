@@ -50,21 +50,8 @@ regToggle(Main, "MM2_AutoPickup", "Auto pickup gun", false, function(v)
     if v then mm2.autoPickupGun.start() else mm2.autoPickupGun.stop() end
 end)
 
--- ---------- Invisible (desync invisible mode) ----------
-Main:NewSection("Invisible")
-regToggle(Main, "MM2_Invisible", "Invisible", false, function(v)
-    if v then hook.desync.startInvisible() else hook.desync.stop() end
-end):AddKeybind(Enum.KeyCode.N, "MM2 Invisible")
-regSlider(Main, "MM2_InvisibleRadius", "Invisible jitter radius", "", { min = 0, max = 500, default = 25 }, function(v)
-    hook.desync.setInvisibleRadius(v)
-end)
-
--- ---------- Murderer ----------
-Main:NewSection("Murderer")
-regToggle(Main, "MM2_TriggerMurderer", "Hover-fire on Murderer", false, function(v)
-    if v then mm2.triggerMurderer.start() else mm2.triggerMurderer.stop() end
-end)
-
+-- ---------- Sheriff: shoot the murderer ----------
+Main:NewSection("Sheriff")
 local SHOOT_ERR = {
     no_gun        = "You don't have the Gun. Only the Sheriff can shoot.",
     no_my_hrp     = "Your character isn't loaded yet.",
@@ -77,6 +64,62 @@ local function tryShoot()
 end
 Main:NewButton("Shoot murderer", tryShoot)
 Main:NewKeybind("Shoot murderer key", Enum.KeyCode.K, function() tryShoot() end)
+
+-- ---------- Murderer: knife kill ----------
+-- Uses your Knife tool's own remotes: KnifeStabbed (the swing) then
+-- HandleTouched (registers a hit on a victim's body part).
+Main:NewSection("Murderer knife")
+local Players2     = game:GetService("Players")
+local LocalPlayer2 = Players2.LocalPlayer
+
+local function knifeEvents()
+    local ch    = LocalPlayer2.Character
+    local knife = ch and ch:FindFirstChild("Knife")
+    local ev    = knife and knife:FindFirstChild("Events")
+    if not ev then return nil end
+    return ev:FindFirstChild("KnifeStabbed"), ev:FindFirstChild("HandleTouched")
+end
+local function victimPart(plr)
+    local ch = plr and plr.Character
+    if not ch then return nil end
+    return ch:FindFirstChild("LowerTorso") or ch:FindFirstChild("Torso") or ch:FindFirstChild("HumanoidRootPart")
+end
+local function isAlive(plr)
+    local ch  = plr and plr.Character
+    local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+    return hum ~= nil and hum.Health > 0
+end
+local function myRoot2()
+    local ch = LocalPlayer2.Character
+    return ch and ch:FindFirstChild("HumanoidRootPart")
+end
+
+-- swing once, then register a hit on every living player (optionally in range)
+local function knifeKillAll(range)
+    local stab, touch = knifeEvents()
+    if not (stab and touch) then notify("You're not holding the [Knife]", 3, "alert"); return end
+    local root = myRoot2()
+    pcall(function() stab:FireServer() end)
+    for _, p in ipairs(Players2:GetPlayers()) do
+        if p ~= LocalPlayer2 and isAlive(p) then
+            local part = victimPart(p)
+            if part and (not range or not root or (part.Position - root.Position).Magnitude <= range) then
+                pcall(function() touch:FireServer(part) end)
+            end
+        end
+    end
+end
+
+Main:NewButton("Kill all", function() knifeKillAll(nil) end)
+local knifeAuraOn, knifeAuraRange = false, 30
+regToggle(Main, "MM2_KnifeAura", "Knife aura (auto)", false, function(v) knifeAuraOn = v end)
+regSlider(Main, "MM2_KnifeAuraRange", "Aura range", "", { min = 5, max = 200, default = 30 }, function(v) knifeAuraRange = v end)
+task.spawn(function()
+    while not library.Unloaded do
+        if knifeAuraOn then knifeKillAll(knifeAuraRange) end
+        task.wait(0.3)
+    end
+end)
 
 -- shared tabs (Movement/Desync/Visuals/World/Misc/Settings/Config) below
 api.buildShared()
