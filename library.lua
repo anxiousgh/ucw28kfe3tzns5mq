@@ -3740,6 +3740,241 @@ function library:Init(key)
             return DropdownFunctions
         end
         --
+        -- HSV colour picker (ported from LinoriaLib, restyled to match Xsx).
+        -- Row shows a swatch; clicking it opens a sat/value map + hue bar +
+        -- hex box popup. callback(Color3) fires on change.
+        function Components:NewColorpicker(text, default, callback)
+            text = text or "color"
+            default = (typeof(default) == "Color3") and default or Color3.fromRGB(255, 255, 255)
+            callback = callback or function() end
+
+            local Mouse = game:GetService("Players").LocalPlayer:GetMouse()
+
+            local cpFrame = Instance.new("Frame")
+            cpFrame.Name = "colorpickerFrame"
+            cpFrame.Parent = page
+            cpFrame.BackgroundTransparency = 1
+            cpFrame.Position = UDim2.new(0.00499999989, 0, 0, 0)
+            cpFrame.Size = UDim2.new(0, 396, 0, 24)
+
+            local cpLabel = Instance.new("TextLabel")
+            cpLabel.Parent = cpFrame
+            cpLabel.BackgroundTransparency = 1
+            cpLabel.Position = UDim2.new(0, 2, 0, 0)
+            cpLabel.Size = UDim2.new(1, -42, 1, 0)
+            cpLabel.Font = Enum.Font.Code
+            cpLabel.Text = text
+            cpLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
+            cpLabel.TextSize = 14
+            cpLabel.TextXAlignment = Enum.TextXAlignment.Left
+            cpLabel.RichText = true
+
+            local swatch = Instance.new("TextButton")
+            swatch.Name = "swatch"
+            swatch.Parent = cpFrame
+            swatch.AnchorPoint = Vector2.new(1, 0.5)
+            swatch.Position = UDim2.new(1, -4, 0.5, 0)
+            swatch.Size = UDim2.new(0, 28, 0, 14)
+            swatch.AutoButtonColor = false
+            swatch.Text = ""
+            swatch.BackgroundColor3 = default
+            swatch.BorderColor3 = Color3.fromRGB(0, 0, 0)
+            local swCorner = Instance.new("UICorner"); swCorner.CornerRadius = UDim.new(0, 2); swCorner.Parent = swatch
+
+            -- popup (parented to the window ScreenGui so it isn't clipped)
+            local pop = Instance.new("Frame")
+            pop.Name = "Color"
+            pop.Parent = screen
+            pop.ZIndex = 60
+            pop.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            pop.Size = UDim2.fromOffset(190, 196)
+            pop.Visible = false
+            local popCorner = Instance.new("UICorner"); popCorner.CornerRadius = UDim.new(0, 2); popCorner.Parent = pop
+
+            local popInner = Instance.new("Frame")
+            popInner.Parent = pop
+            popInner.AnchorPoint = Vector2.new(0.5, 0.5)
+            popInner.Position = UDim2.new(0.5, 0, 0.5, 0)
+            popInner.Size = UDim2.new(1, -2, 1, -2)
+            popInner.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            popInner.ClipsDescendants = true
+            popInner.ZIndex = 61
+            local popInnerCorner = Instance.new("UICorner"); popInnerCorner.CornerRadius = UDim.new(0, 2); popInnerCorner.Parent = popInner
+            local popGrad = Instance.new("UIGradient")
+            popGrad.Color = ColorSequence.new{ ColorSequenceKeypoint.new(0, Color3.fromRGB(34, 34, 34)), ColorSequenceKeypoint.new(1, Color3.fromRGB(28, 28, 28)) }
+            popGrad.Rotation = 90
+            popGrad.Parent = popInner
+
+            local popBar = Instance.new("Frame")
+            popBar.Parent = popInner
+            popBar.BackgroundColor3 = library.accentColor
+            popBar.BorderSizePixel = 0
+            popBar.Size = UDim2.new(1, 0, 0, 1)
+            popBar.ZIndex = 62
+
+            local satvibOuter = Instance.new("Frame")
+            satvibOuter.Parent = popInner
+            satvibOuter.Position = UDim2.fromOffset(8, 8)
+            satvibOuter.Size = UDim2.fromOffset(150, 150)
+            satvibOuter.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            satvibOuter.ZIndex = 62
+            local satvib = Instance.new("ImageLabel")
+            satvib.Parent = satvibOuter
+            satvib.Position = UDim2.fromOffset(1, 1)
+            satvib.Size = UDim2.new(1, -2, 1, -2)
+            satvib.BorderSizePixel = 0
+            satvib.Image = "rbxassetid://4155801252"
+            satvib.ZIndex = 63
+            local cur = Instance.new("ImageLabel")
+            cur.Parent = satvib
+            cur.AnchorPoint = Vector2.new(0.5, 0.5)
+            cur.Size = UDim2.fromOffset(6, 6)
+            cur.BackgroundTransparency = 1
+            cur.Image = "rbxassetid://9619665977"
+            cur.ImageColor3 = Color3.fromRGB(0, 0, 0)
+            cur.ZIndex = 64
+
+            local hueOuter = Instance.new("Frame")
+            hueOuter.Parent = popInner
+            hueOuter.Position = UDim2.fromOffset(164, 8)
+            hueOuter.Size = UDim2.fromOffset(14, 150)
+            hueOuter.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            hueOuter.ZIndex = 62
+            local hue = Instance.new("Frame")
+            hue.Parent = hueOuter
+            hue.Position = UDim2.fromOffset(1, 1)
+            hue.Size = UDim2.new(1, -2, 1, -2)
+            hue.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            hue.BorderSizePixel = 0
+            hue.ZIndex = 63
+            local hueSeq = {}
+            for i = 0, 9 do hueSeq[#hueSeq + 1] = ColorSequenceKeypoint.new(i / 9, Color3.fromHSV(i / 9, 1, 1)) end
+            local hueGrad = Instance.new("UIGradient"); hueGrad.Color = ColorSequence.new(hueSeq); hueGrad.Rotation = 90; hueGrad.Parent = hue
+            local hueCur = Instance.new("Frame")
+            hueCur.Parent = hue
+            hueCur.AnchorPoint = Vector2.new(0, 0.5)
+            hueCur.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            hueCur.BorderColor3 = Color3.fromRGB(0, 0, 0)
+            hueCur.Size = UDim2.new(1, 0, 0, 1)
+            hueCur.ZIndex = 64
+
+            local hexOuter = Instance.new("Frame")
+            hexOuter.Parent = popInner
+            hexOuter.Position = UDim2.fromOffset(8, 164)
+            hexOuter.Size = UDim2.fromOffset(170, 22)
+            hexOuter.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            hexOuter.ZIndex = 62
+            local hexCorner = Instance.new("UICorner"); hexCorner.CornerRadius = UDim.new(0, 2); hexCorner.Parent = hexOuter
+            local hexBox = Instance.new("TextBox")
+            hexBox.Parent = hexOuter
+            hexBox.AnchorPoint = Vector2.new(0.5, 0.5)
+            hexBox.Position = UDim2.new(0.5, 0, 0.5, 0)
+            hexBox.Size = UDim2.new(1, -6, 1, -4)
+            hexBox.BackgroundTransparency = 1
+            hexBox.Font = Enum.Font.Code
+            hexBox.Text = "#FFFFFF"
+            hexBox.PlaceholderText = "#hex"
+            hexBox.TextColor3 = Color3.fromRGB(190, 190, 190)
+            hexBox.TextSize = 14
+            hexBox.ClearTextOnFocus = false
+            hexBox.ZIndex = 63
+
+            local H, S, V = Color3.toHSV(default)
+            local value = default
+            local changedFn
+
+            local function display()
+                value = Color3.fromHSV(H, S, V)
+                satvib.BackgroundColor3 = Color3.fromHSV(H, 1, 1)
+                swatch.BackgroundColor3 = value
+                cur.Position = UDim2.new(S, 0, 1 - V, 0)
+                hueCur.Position = UDim2.new(0, 0, H, 0)
+                hexBox.Text = "#" .. value:ToHex()
+            end
+            local function displayAndFire()
+                display()
+                callback(value)
+                if changedFn then changedFn(value) end
+            end
+
+            satvib.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+                        local minX = satvib.AbsolutePosition.X
+                        local maxX = minX + satvib.AbsoluteSize.X
+                        local minY = satvib.AbsolutePosition.Y
+                        local maxY = minY + satvib.AbsoluteSize.Y
+                        S = (math.clamp(Mouse.X, minX, maxX) - minX) / math.max(1, maxX - minX)
+                        V = 1 - (math.clamp(Mouse.Y, minY, maxY) - minY) / math.max(1, maxY - minY)
+                        displayAndFire()
+                        RunService.RenderStepped:Wait()
+                    end
+                end
+            end)
+            hue.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+                        local minY = hue.AbsolutePosition.Y
+                        local maxY = minY + hue.AbsoluteSize.Y
+                        H = (math.clamp(Mouse.Y, minY, maxY) - minY) / math.max(1, maxY - minY)
+                        displayAndFire()
+                        RunService.RenderStepped:Wait()
+                    end
+                end
+            end)
+            hexBox.FocusLost:Connect(function()
+                local ok, col = pcall(Color3.fromHex, hexBox.Text)
+                if ok and typeof(col) == "Color3" then H, S, V = Color3.toHSV(col) end
+                displayAndFire()
+            end)
+
+            local function reposition()
+                pop.Position = UDim2.fromOffset(
+                    swatch.AbsolutePosition.X + swatch.AbsoluteSize.X - 190,
+                    swatch.AbsolutePosition.Y + 18)
+            end
+            swatch.MouseButton1Click:Connect(function()
+                pop.Visible = not pop.Visible
+                if pop.Visible then reposition() end
+            end)
+            swatch:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+                if pop.Visible then reposition() end
+            end)
+            UserInputService.InputBegan:Connect(function(input)
+                if library.Unloaded or not pop.Visible then return end
+                if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+                local ap, asz = pop.AbsolutePosition, pop.AbsoluteSize
+                local sp, ssz = swatch.AbsolutePosition, swatch.AbsoluteSize
+                local mx, my = Mouse.X, Mouse.Y
+                local inPop = mx >= ap.X and mx <= ap.X + asz.X and my >= ap.Y and my <= ap.Y + asz.Y
+                local inSw  = mx >= sp.X and mx <= sp.X + ssz.X and my >= sp.Y and my <= sp.Y + ssz.Y
+                if not inPop and not inSw then pop.Visible = false end
+            end)
+
+            local ColorpickerFunctions = {}
+            function ColorpickerFunctions:Set(color)
+                if typeof(color) == "Color3" then
+                    H, S, V = Color3.toHSV(color)
+                    display()
+                    callback(value)
+                    if changedFn then changedFn(value) end
+                end
+                return ColorpickerFunctions
+            end
+            function ColorpickerFunctions:Get() return value end
+            function ColorpickerFunctions:OnChanged(fn) changedFn = fn; if fn then fn(value) end; return ColorpickerFunctions end
+            function ColorpickerFunctions:SetFunction(fn) callback = fn or callback; return ColorpickerFunctions end
+            function ColorpickerFunctions:Text(t) cpLabel.Text = t or cpLabel.Text; return ColorpickerFunctions end
+            function ColorpickerFunctions:Hide() cpFrame.Visible = false; return ColorpickerFunctions end
+            function ColorpickerFunctions:Show() cpFrame.Visible = true; return ColorpickerFunctions end
+            function ColorpickerFunctions:Remove() cpFrame:Destroy(); pop:Destroy(); return ColorpickerFunctions end
+
+            display()
+            callback(value)   -- apply default
+            UpdatePageSize()
+            return ColorpickerFunctions
+        end
+        --
         function Components:NewSlider(text, suffix, compare, compareSign, values, callback)
             text = text or "slider"
             suffix = suffix or ""

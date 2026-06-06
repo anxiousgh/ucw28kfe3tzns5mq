@@ -257,11 +257,21 @@ local COLORS = {
     Yellow = Color3.fromRGB(255, 230, 90),  Orange = Color3.fromRGB(255, 150, 70),
     Gray   = Color3.fromRGB(120, 120, 120), Black  = Color3.fromRGB(0, 0, 0),
 }
--- Xsx has no colour picker, so colours are preset dropdowns.
-local function regColor(tab, key, text, defaultName, apply)
-    regDropdown(tab, key, text, defaultName, COLOR_NAMES, false, function(name)
-        local c = COLORS[name]; if c then apply(c) end
+-- HSV colour picker (library NewColorpicker); config-saved as a hex string.
+-- `default` may be a Color3 or a COLORS preset name.
+local function regColor(tab, key, text, default, apply)
+    local defaultColor = (typeof(default) == "Color3") and default or (COLORS[default] or COLORS.White)
+    flags[key] = defaultColor:ToHex()
+    local h = tab:NewColorpicker(text, defaultColor, function(c)
+        flags[key] = c:ToHex()
+        apply(c)
     end)
+    controls[key] = { set = function(hex)
+        if type(hex) ~= "string" then return end
+        local ok, col = pcall(Color3.fromHex, hex)
+        if ok and typeof(col) == "Color3" then flags[key] = hex; h:Set(col) end
+    end }
+    return h
 end
 -- Xsx slider is integer-only; this presents an int range and applies value/scale.
 local function regDecimal(tab, key, text, suffix, dmin, dmax, ddefault, scale, apply)
