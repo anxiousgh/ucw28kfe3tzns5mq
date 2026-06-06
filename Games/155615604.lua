@@ -26,7 +26,16 @@ end
 local Aura = Window:NewTab("Killaura")
 Aura:NewSection("Kill aura")
 regToggle(Aura, "PL_KillAura", "Kill aura", false, function(v)
-    if v then pl.killAura.start() else pl.killAura.stop() end
+    if v then
+        -- killaura must only fire on genuinely visible targets:
+        -- strict check (no see-through walls) from the head origin
+        hook.utils.setStrictVisibleCheck(true)
+        hook.utils.setVisibleOrigin("Head")
+        pl.killAura.start()
+    else
+        pl.killAura.stop()
+        hook.utils.setStrictVisibleCheck(false)
+    end
 end):AddKeybind(Enum.KeyCode.F, "Killaura Toggle")
 Aura:NewLabel("Auto-shoots the nearest visible enemy. Range/fire-rate are read from the equipped gun.", "left")
 
