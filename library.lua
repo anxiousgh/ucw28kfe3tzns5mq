@@ -1946,7 +1946,7 @@ function library:Init(key)
             end
             UpdatePageSize()
             --
-            function ToggleFunctions:AddKeybind(default_t)
+            function ToggleFunctions:AddKeybind(default_t, displayName)
                 callback_t = callback
                 default_t = default_t or Enum.KeyCode.P
                 
@@ -2099,7 +2099,7 @@ function library:Init(key)
                 -- register for the on-screen keybind list (live key + state)
                 if not library.keybinds then library.keybinds = {} end
                 table.insert(library.keybinds, {
-                    name   = text,
+                    name   = displayName or text,
                     getKey = function() return ChosenKey end,
                     isOn   = function() return On end,
                 })

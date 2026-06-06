@@ -25,7 +25,7 @@ local Aim = Window:NewTab("Aimlock")
 Aim:NewSection("Camera lock")
 
 regToggle(Aim, "CamEnabled", "Enabled", cs.Enabled or false, function(v) cam.setEnabled(v) end)
-    :AddKeybind(Enum.KeyCode.C)
+    :AddKeybind(Enum.KeyCode.C, "Camera Lock Toggle")
 regToggle(Aim, "CamTeamCheck",   "Team check",        cs.TeamCheck or false,   function(v) cam.setTeamCheck(v) end)
 regToggle(Aim, "CamSticky",      "Sticky target",     cs.Sticky or false,      function(v) cam.setSticky(v) end)
 regToggle(Aim, "CamClosestPart", "Closest bodypart",  cs.ClosestPart or false, function(v) cam.setClosestPart(v) end)
@@ -54,7 +54,7 @@ local Trig = Window:NewTab("Triggerbot")
 Trig:NewSection("Triggerbot")
 
 regToggle(Trig, "TrigEnabled", "Enabled", ts.Enabled or false, function(v) trig.setEnabled(v) end)
-    :AddKeybind(Enum.KeyCode.Y)
+    :AddKeybind(Enum.KeyCode.Y, "Triggerbot Toggle")
 regToggle(Trig, "TrigTeamCheck", "Team check", ts.TeamCheck or false, function(v) trig.setTeamCheck(v) end)
 
 regDropdown(Trig, "TrigHitPart", "Hit part", ts.TargetPart or "All", {

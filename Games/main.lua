@@ -156,23 +156,23 @@ local Movement = Window:NewTab("Movement")
 
 Movement:NewSection("Movement")
 regToggle(Movement, "Fly", "Fly", false, function(v) if v then hook.fly.start() else hook.fly.stop() end end)
-    :AddKeybind(Enum.KeyCode.Z)
+    :AddKeybind(Enum.KeyCode.Z, "Fly")
 regSlider(Movement, "FlySpeed", "Fly speed", "", { min = 5, max = 3000, default = hook.fly.getSpeed() or 60 },
     function(v) hook.fly.setSpeed(v) end)
 
 regToggle(Movement, "Walkspeed", "Walkspeed", false, function(v) if v then hook.walkspeed.start() else hook.walkspeed.stop() end end)
-    :AddKeybind(Enum.KeyCode.X)
+    :AddKeybind(Enum.KeyCode.X, "Walkspeed")
 regSlider(Movement, "WalkspeedValue", "Walkspeed value", "", { min = 8, max = 1000, default = hook.walkspeed.getValue() or 50 },
     function(v) hook.walkspeed.setValue(v) end)
 
 regToggle(Movement, "JumpPower", "Jump power", false, function(v) if v then hook.jumpPower.start() else hook.jumpPower.stop() end end)
-    :AddKeybind(Enum.KeyCode.V)
+    :AddKeybind(Enum.KeyCode.V, "Jump Power")
 regSlider(Movement, "JumpPowerValue", "Jump power value", "", { min = 0, max = 2000, default = hook.jumpPower.getValue() or 50 },
     function(v) hook.jumpPower.setValue(v) end)
 
 regToggle(Movement, "CFrameSpeed", "CFrame speed", false,
     function(v) if v then hook.cframeSpeed.start(hook.cframeSpeed.getMultiplier()) else hook.cframeSpeed.stop() end end)
-    :AddKeybind(Enum.KeyCode.B)
+    :AddKeybind(Enum.KeyCode.B, "CFrame Speed")
 regSlider(Movement, "CFrameMult", "CFrame speed multiplier", "x", { min = 1, max = 100, default = hook.cframeSpeed.getMultiplier() or 2 },
     function(v) hook.cframeSpeed.setMultiplier(v) end)
 
@@ -203,8 +203,11 @@ end)
 regToggle(Movement, "IceSlide", "Ice slide", false, function(v) if v then hook.ice.start() else hook.ice.stop() end end)
 regSlider(Movement, "IceFriction", "Slide friction", "%", { min = 50, max = 99, default = 98 }, function(v) hook.ice.setSlide(v / 100) end)
 
--- ---------- Desync ----------
-Movement:NewSection("Desync")
+-- ============================================================
+--  DESYNC  (own tab)
+-- ============================================================
+local Desync = Window:NewTab("Desync")
+Desync:NewSection("Desync")
 local desyncMode, desyncOn = "Void", false
 local desyncMin, desyncMax = 5000, 20000
 local desyncEnableT
@@ -219,7 +222,7 @@ local MODE_START = {
         return ok
     end,
 }
-regDropdown(Movement, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet" }, false, function(v)
+regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet" }, false, function(v)
     desyncMode = v
     if desyncOn then
         hook.desync.stop()
@@ -227,7 +230,7 @@ regDropdown(Movement, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spi
         if not starter or not starter() then if desyncEnableT then desyncEnableT:Set(false) end end
     end
 end)
-desyncEnableT = regToggle(Movement, "DesyncEnabled", "Enable desync", false, function(v)
+desyncEnableT = regToggle(Desync, "DesyncEnabled", "Enable desync", false, function(v)
     desyncOn = v
     if v then
         local starter = MODE_START[desyncMode]
@@ -236,14 +239,150 @@ desyncEnableT = regToggle(Movement, "DesyncEnabled", "Enable desync", false, fun
         hook.desync.stop()
     end
 end)
-desyncEnableT:AddKeybind(Enum.KeyCode.G)
-regSlider(Movement, "DesyncMin", "Void min distance", "", { min = 500, max = 100000, default = 5000 },
+desyncEnableT:AddKeybind(Enum.KeyCode.G, "Desync Toggle")
+regSlider(Desync, "DesyncMin", "Void min distance", "", { min = 500, max = 100000, default = 5000 },
     function(v) desyncMin = v; hook.desync.setRange(desyncMin, desyncMax) end)
-regSlider(Movement, "DesyncMax", "Void max distance", "", { min = 500, max = 100000, default = 20000 },
+regSlider(Desync, "DesyncMax", "Void max distance", "", { min = 500, max = 100000, default = 20000 },
     function(v) desyncMax = v; hook.desync.setRange(desyncMin, desyncMax) end)
-regSlider(Movement, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", { min = 1, max = 360, default = 47 }, function(v) hook.desync.setSpinSpeed(v) end)
-regSlider(Movement, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
-regSlider(Movement, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
+regSlider(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", { min = 1, max = 360, default = 47 }, function(v) hook.desync.setSpinSpeed(v) end)
+regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
+regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
+
+-- ---------- shared helpers for Visuals / World ----------
+local COLOR_NAMES = { "White", "Red", "Green", "Blue", "Purple", "Cyan", "Yellow", "Orange", "Gray", "Black" }
+local COLORS = {
+    White  = Color3.fromRGB(255, 255, 255), Red    = Color3.fromRGB(255, 60, 60),
+    Green  = Color3.fromRGB(80, 255, 80),   Blue   = Color3.fromRGB(80, 150, 255),
+    Purple = Color3.fromRGB(232, 158, 255), Cyan   = Color3.fromRGB(90, 230, 230),
+    Yellow = Color3.fromRGB(255, 230, 90),  Orange = Color3.fromRGB(255, 150, 70),
+    Gray   = Color3.fromRGB(120, 120, 120), Black  = Color3.fromRGB(0, 0, 0),
+}
+-- Xsx has no colour picker, so colours are preset dropdowns.
+local function regColor(tab, key, text, defaultName, apply)
+    regDropdown(tab, key, text, defaultName, COLOR_NAMES, false, function(name)
+        local c = COLORS[name]; if c then apply(c) end
+    end)
+end
+-- Xsx slider is integer-only; this presents an int range and applies value/scale.
+local function regDecimal(tab, key, text, suffix, dmin, dmax, ddefault, scale, apply)
+    regSlider(tab, key, text, suffix,
+        { min = math.floor(dmin * scale), max = math.floor(dmax * scale), default = math.floor(ddefault * scale) },
+        function(v) apply(v / scale) end)
+end
+
+-- ============================================================
+--  VISUALS
+-- ============================================================
+local Visuals = Window:NewTab("Visuals")
+
+Visuals:NewSection("ESP")
+regToggle(Visuals, "EspEnabled", "Enabled", false, function(v) if v then hook.esp.start() else hook.esp.stop() end end)
+    :AddKeybind(Enum.KeyCode.M, "ESP Toggle")
+regToggle(Visuals, "EspBox", "Boxes", false, function(v) hook.esp.setBox(v) end)
+regDropdown(Visuals, "EspBoxStyle", "Box style", "Corners", { "Corners", "Full" }, false, function(v) hook.esp.setBoxStyle(v) end)
+regToggle(Visuals, "EspNames", "Names", false, function(v) hook.esp.setNames(v) end)
+regToggle(Visuals, "EspHealth", "Health bars", false, function(v) hook.esp.setHealth(v) end)
+regToggle(Visuals, "EspHealthNum", "Health number", false, function(v) hook.esp.setHealthNum(v) end)
+regToggle(Visuals, "EspDistance", "Distance", false, function(v) hook.esp.setDistance(v) end)
+regToggle(Visuals, "EspTracer", "Tracers", false, function(v) hook.esp.setTracer(v) end)
+regDropdown(Visuals, "EspTracerOrigin", "Tracer origin", "Bottom", { "Bottom", "Center", "Top", "Mouse" }, false, function(v) hook.esp.setTracerOrigin(v) end)
+regToggle(Visuals, "EspSkeleton", "Skeleton", false, function(v) hook.esp.setSkeleton(v) end)
+regToggle(Visuals, "EspHeldItem", "Held item", false, function(v) hook.esp.setHeldItem(v) end)
+regToggle(Visuals, "EspTeamColors", "Team check", false, function(v) hook.esp.setTeamCheck(v) end)
+regToggle(Visuals, "EspChams", "Chams", false, function(v) hook.esp.setChams(v) end)
+regDropdown(Visuals, "EspChamsStyle", "Chams style", "Overlay", { "Overlay", "Occluded", "Outline" }, false, function(v) hook.esp.setChamsStyle(v) end)
+regToggle(Visuals, "EspSelf", "Self ESP", false, function(v) hook.esp.setSelf(v) end)
+
+Visuals:NewSection("ESP colors")
+regColor(Visuals, "EspEnemyColor",   "Enemy",         "Red",    function(c) hook.esp.setEnemyColor(c) end)
+regColor(Visuals, "EspTeamColor",    "Team",          "Green",  function(c) hook.esp.setTeamColor(c) end)
+regColor(Visuals, "EspNeutralColor", "Neutral",       "Yellow", function(c) hook.esp.setNeutralColor(c) end)
+regColor(Visuals, "EspTracerColor",  "Tracer",        "White",  function(c) hook.esp.setTracerColor(c) end)
+regColor(Visuals, "EspChamsFill",    "Chams fill",    "Purple", function(c) hook.esp.setChamsFill(c) end)
+regColor(Visuals, "EspChamsOutline", "Chams outline", "White",  function(c) hook.esp.setChamsOutline(c) end)
+
+Visuals:NewSection("Tool material")
+regToggle(Visuals, "ToolMaterial", "Enabled", false, function(v) if v then hook.toolMaterial.start() else hook.toolMaterial.stop() end end)
+regDropdown(Visuals, "ToolMaterialKind", "Material", "Neon", { "Neon", "ForceField" }, false, function(v) hook.toolMaterial.setMaterial(v) end)
+regColor(Visuals, "ToolMaterialColor", "Color", "Red", function(c) hook.toolMaterial.setColor(c) end)
+regDecimal(Visuals, "ToolMaterialTransp", "Transparency", "%", 0, 1, 0, 100, function(v) hook.toolMaterial.setTransparency(v) end)
+
+Visuals:NewSection("Body material")
+regToggle(Visuals, "BodyMaterial", "Enabled", false, function(v) if v then hook.bodyMaterial.start() else hook.bodyMaterial.stop() end end)
+regDropdown(Visuals, "BodyMaterialKind", "Material", "Neon", { "Neon", "ForceField" }, false, function(v) hook.bodyMaterial.setMaterial(v) end)
+regColor(Visuals, "BodyMaterialColor", "Color", "Red", function(c) hook.bodyMaterial.setColor(c) end)
+regDecimal(Visuals, "BodyMaterialTransp", "Transparency", "%", 0, 1, 0, 100, function(v) hook.bodyMaterial.setTransparency(v) end)
+
+-- ============================================================
+--  WORLD
+-- ============================================================
+local Lighting = game:GetService("Lighting")
+local LIGHT_DEFAULTS = {
+    Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
+    ExposureCompensation = Lighting.ExposureCompensation,
+    Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
+    FogStart = Lighting.FogStart, FogEnd = Lighting.FogEnd, FogColor = Lighting.FogColor,
+    GlobalShadows = Lighting.GlobalShadows,
+}
+local function fxInstance(class, name)
+    local ex = Lighting:FindFirstChild(name)
+    if ex and ex:IsA(class) then return ex end
+    local inst = Instance.new(class); inst.Name = name; inst.Enabled = false; inst.Parent = Lighting
+    return inst
+end
+local CC      = fxInstance("ColorCorrectionEffect", "_wh_cc")
+local Bloom   = fxInstance("BloomEffect",           "_wh_bloom")
+local Blur    = fxInstance("BlurEffect",            "_wh_blur")
+local SunRays = fxInstance("SunRaysEffect",         "_wh_sunrays")
+
+local World = Window:NewTab("World")
+
+World:NewSection("Lighting")
+regToggle(World, "Fullbright", "Fullbright", false, function(v) if v then hook.fullbright.start() else hook.fullbright.stop() end end)
+regToggle(World, "GlobalShadows", "Global shadows", Lighting.GlobalShadows, function(v) Lighting.GlobalShadows = v end)
+regSlider(World, "LightBrightness", "Brightness", "", { min = 0, max = 10, default = math.floor(Lighting.Brightness) }, function(v) Lighting.Brightness = v end)
+regSlider(World, "LightClockTime", "Time of day", "", { min = 0, max = 24, default = math.floor(math.clamp(Lighting.ClockTime, 0, 24)) }, function(v) Lighting.ClockTime = v end)
+regSlider(World, "LightExposure", "Exposure", "", { min = -5, max = 5, default = math.floor(Lighting.ExposureCompensation) }, function(v) Lighting.ExposureCompensation = v end)
+regColor(World, "LightAmbient", "Ambient", "Gray", function(c) Lighting.Ambient = c end)
+regColor(World, "LightOutdoor", "Outdoor ambient", "Gray", function(c) Lighting.OutdoorAmbient = c end)
+World:NewButton("Restore default lighting", function()
+    for k, v in pairs(LIGHT_DEFAULTS) do pcall(function() Lighting[k] = v end) end
+    notify("Lighting restored", 2, "information")
+end)
+
+World:NewSection("Atmosphere")
+regSlider(World, "FogStart", "Fog start", "", { min = 0, max = 5000, default = math.floor(math.min(Lighting.FogStart, 5000)) }, function(v) Lighting.FogStart = v end)
+regSlider(World, "FogEnd", "Fog end", "", { min = 0, max = 50000, default = math.floor(math.min(Lighting.FogEnd, 50000)) }, function(v) Lighting.FogEnd = v end)
+regColor(World, "FogColor", "Fog color", "Gray", function(c) Lighting.FogColor = c end)
+World:NewButton("Clear fog", function() Lighting.FogStart = 0; Lighting.FogEnd = 100000 end)
+
+World:NewSection("Post FX - Color correction")
+regToggle(World, "CCEnabled", "Enabled", false, function(v) CC.Enabled = v end)
+regDecimal(World, "CCBrightness", "Brightness", "%", -1, 1, 0, 100, function(v) CC.Brightness = v end)
+regDecimal(World, "CCContrast", "Contrast", "%", -1, 1, 0, 100, function(v) CC.Contrast = v end)
+regDecimal(World, "CCSaturation", "Saturation", "%", -1, 5, 0, 100, function(v) CC.Saturation = v end)
+regColor(World, "CCTint", "Tint", "White", function(c) CC.TintColor = c end)
+
+World:NewSection("Post FX - Bloom")
+regToggle(World, "BloomEnabled", "Enabled", false, function(v) Bloom.Enabled = v end)
+regDecimal(World, "BloomIntensity", "Intensity", "", 0, 5, 0.4, 10, function(v) Bloom.Intensity = v end)
+regSlider(World, "BloomThreshold", "Threshold", "", { min = 0, max = 10, default = 2 }, function(v) Bloom.Threshold = v end)
+regSlider(World, "BloomSize", "Size", "", { min = 0, max = 64, default = 24 }, function(v) Bloom.Size = v end)
+
+World:NewSection("Post FX - Blur")
+regToggle(World, "BlurEnabled", "Enabled", false, function(v) Blur.Enabled = v end)
+regSlider(World, "BlurSize", "Size", "", { min = 0, max = 56, default = 12 }, function(v) Blur.Size = v end)
+
+World:NewSection("Post FX - Sun rays")
+regToggle(World, "SunRaysEnabled", "Enabled", false, function(v) SunRays.Enabled = v end)
+regDecimal(World, "SunRaysIntensity", "Intensity", "%", 0, 1, 0.25, 100, function(v) SunRays.Intensity = v end)
+regDecimal(World, "SunRaysSpread", "Spread", "%", 0, 1, 1, 100, function(v) SunRays.Spread = v end)
+
+World:NewSection("Camera")
+regToggle(World, "Freecam", "Freecam", false, function(v) if v then hook.freecam.start() else hook.freecam.stop() end end)
+    :AddKeybind(Enum.KeyCode.L, "Freecam Toggle")
+regToggle(World, "Zoom", "Extended zoom", false, function(v) if v then hook.zoom.start() else hook.zoom.stop() end end)
+regSlider(World, "Fov", "FOV", "", { min = 30, max = 120, default = math.floor(hook.fov.get() or 70) }, function(v) hook.fov.set(v) end)
 
 -- ============================================================
 --  MISC
