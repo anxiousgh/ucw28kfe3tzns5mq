@@ -223,8 +223,21 @@ local uprightTp = hook.uprightTp or function(_, h, pos, face)
     if h then h.CFrame = CFrame.new(pos, pos + Vector3.new((face and face.X) or 0, 0, (face and face.Z) or -1)) end
 end
 
+-- the six guns; TP shoot / Bring abort if we hold none of them
+local GUN_NAMES = { "[DoubleBarrel]", "[Revolver]", "[SMG]", "[Shotgun]", "[Silencer]", "[TacticalShotgun]" }
+local DB_NAMES  = { "[DoubleBarrel]", "[Double Barrel]", "[Double-Barrel]" }
+
+-- true if any of the six guns is in our character or backpack
+local function hasAnyGun()
+    local char = LocalPlayer.Character
+    local bp   = LocalPlayer:FindFirstChild("Backpack")
+    for _, n in ipairs(GUN_NAMES) do
+        if (char and char:FindFirstChild(n)) or (bp and bp:FindFirstChild(n)) then return true end
+    end
+    return false
+end
+
 -- equip the Double Barrel if not already holding it
-local DB_NAMES = { "[DoubleBarrel]", "[Double Barrel]", "[Double-Barrel]" }
 local function equipDoubleBarrel()
     local char = LocalPlayer.Character
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
@@ -244,6 +257,7 @@ end
 
 -- TP shoot: equip DB -> save spot -> TP to target (upright) -> force-hit -> TP back ~1s
 local function tpShoot()
+    if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
     local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
     local lc   = LocalPlayer.Character
     local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
@@ -271,6 +285,7 @@ end
 -- upright onto their UpperTorso, fire grab once, then TP back 0.5s AFTER our
 -- BodyEffects.Grabbed value changes; resume auto-stomp.
 local function bring()
+    if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
     local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
     local lc   = LocalPlayer.Character
     local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
