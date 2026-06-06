@@ -380,6 +380,56 @@ regDecimal(Visuals, "BodyMaterialTransp", "Transparency", "%", 0, 1, 0, 100, fun
 Visuals:NewSection("Camera")
 regToggle(Visuals, "UnlockZoom", "Unlock zoom", false, function(v) if v then hook.zoom.start() else hook.zoom.stop() end end)
 
+-- Server position visualizer: a ForceField clone of your character parked
+-- at your server-side position. Reading HRP.CFrame on Heartbeat (after
+-- physics, when position-spoofs have set the server-bound CFrame) gives
+-- the server position for any spoof; with none it just sits on you.
+Visuals:NewSection("Server position")
+do
+    local RunSvc = game:GetService("RunService")
+    local serverVizOn = false
+    local clone
+
+    local function destroyClone()
+        if clone then clone:Destroy(); clone = nil end
+    end
+    local function buildClone()
+        destroyClone()
+        local char = LocalPlr.Character
+        if not char then return end
+        local ok, c = pcall(function() return char:Clone() end)
+        if not ok or not c then return end
+        for _, d in ipairs(c:GetDescendants()) do
+            if d:IsA("BasePart") then
+                d.Anchored = true; d.CanCollide = false; d.CanQuery = false; d.CastShadow = false
+                d.Material = Enum.Material.ForceField
+            elseif d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Humanoid") then
+                pcall(function() d:Destroy() end)
+            end
+        end
+        c.Name = "_wh_serverpos"
+        c.Parent = workspace
+        clone = c
+    end
+
+    regToggle(Visuals, "ServerPosViz", "Server position visualizer", false, function(v)
+        serverVizOn = v
+        if v then buildClone() else destroyClone() end
+    end)
+    LocalPlr.CharacterAdded:Connect(function()
+        if serverVizOn then task.wait(0.4); if serverVizOn then buildClone() end end
+    end)
+    RunSvc.Heartbeat:Connect(function()
+        if library.Unloaded then destroyClone(); return end
+        if not serverVizOn then return end
+        local char = LocalPlr.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        if not clone or not clone.Parent then buildClone() end
+        if clone then pcall(function() clone:PivotTo(hrp.CFrame) end) end
+    end)
+end
+
 -- ============================================================
 --  WORLD
 -- ============================================================
