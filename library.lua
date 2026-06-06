@@ -1097,10 +1097,51 @@ function library:Init(key)
 
     drag(edge, 0.04)
     local CanChangeVisibility = true
+
+    -- Toggle the window with a fade instead of an instant show/hide.
+    -- Captures each element's current transparency into an attribute on
+    -- hide and tweens everything to 1, then back on show (covers tabs/
+    -- components added after Init too, since it walks the live tree).
+    local FADE_PROPS = { "BackgroundTransparency", "TextTransparency", "ImageTransparency" }
+    local FADE_INFO  = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local windowHidden = false
+    local fadeToken = 0
+    local function fadeWindow(hide)
+        fadeToken = fadeToken + 1
+        local myToken = fadeToken
+        local function eachInst(fn)
+            fn(edge)
+            for _, d in ipairs(edge:GetDescendants()) do fn(d) end
+        end
+        if hide then
+            eachInst(function(d)
+                for _, p in ipairs(FADE_PROPS) do
+                    local ok, val = pcall(function() return d[p] end)
+                    if ok and type(val) == "number" and val < 1 then
+                        d:SetAttribute("_whFade_" .. p, val)
+                        TweenService:Create(d, FADE_INFO, { [p] = 1 }):Play()
+                    end
+                end
+            end)
+            task.delay(0.22, function() if myToken == fadeToken then edge.Visible = false end end)
+        else
+            edge.Visible = true
+            eachInst(function(d)
+                for _, p in ipairs(FADE_PROPS) do
+                    local base = d:GetAttribute("_whFade_" .. p)
+                    if base ~= nil then
+                        TweenService:Create(d, FADE_INFO, { [p] = base }):Play()
+                    end
+                end
+            end)
+        end
+    end
+
     UserInputService.InputBegan:Connect(function(input)
         if library.Unloaded then return end
-        if CanChangeVisibility and input.KeyCode == key then
-            edge.Visible = not edge.Visible
+        if CanChangeVisibility and input.KeyCode == key and not UserInputService:GetFocusedTextBox() then
+            windowHidden = not windowHidden
+            fadeWindow(windowHidden)
         end
     end)
 
