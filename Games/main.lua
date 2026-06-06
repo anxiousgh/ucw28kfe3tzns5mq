@@ -44,8 +44,8 @@ local AUTOLOAD_PATH = ROOT .. "/autoload.json"
 -- (gets its OWN config system named after it) only if listed here.
 -- Every other game uses the universal config system. The two never mix.
 local GAMES = {
+    ["155615604"]  = "Prison Life",
     -- ["2788229376"] = "Hood Customs",
-    -- ["155615604"]  = "Prison Life",
     -- ["286090429"]  = "Minesweeper",
 }
 local supportedName = GAMES[placeId]   -- nil => unsupported => universal configs
