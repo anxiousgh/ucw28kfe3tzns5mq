@@ -3171,6 +3171,10 @@ F.stickyEmote = (function()
 end)()
 
 F.respawn = { fire = cmdRe }
+-- upright teleport (clears ragdoll/sit, faces horizontally, zeroes velocity,
+-- syncs desync) -- used by TP shoot / Bring so you don't fall over onto a
+-- knocked player
+F.uprightTp = _uprightTp
 F.blink   = {
     fire = cmdBlink,
     setDistance = function(n) BLINK_DIST = tonumber(n) or BLINK_DIST end,

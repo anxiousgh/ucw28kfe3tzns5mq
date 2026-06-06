@@ -218,23 +218,48 @@ end)
 Target:NewSection("Target actions")
 local function activeTarget() return bestTarget(false, false, nil) end
 
--- TP shoot: save spot -> TP to target -> force-hit -> TP back ~1s later
+-- upright teleport (won't fall over onto knocked players) + desync-aware
+local uprightTp = hook.uprightTp or function(_, h, pos, face)
+    if h then h.CFrame = CFrame.new(pos, pos + Vector3.new((face and face.X) or 0, 0, (face and face.Z) or -1)) end
+end
+
+-- equip the Double Barrel if not already holding it
+local DB_NAMES = { "[DoubleBarrel]", "[Double Barrel]", "[Double-Barrel]" }
+local function equipDoubleBarrel()
+    local char = LocalPlayer.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not hum then return end
+    for _, n in ipairs(DB_NAMES) do if char:FindFirstChild(n) then return end end  -- already equipped
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if not bp then return end
+    for _, n in ipairs(DB_NAMES) do
+        local tool = bp:FindFirstChild(n)
+        if tool and tool:IsA("Tool") then pcall(function() hum:EquipTool(tool) end); return end
+    end
+end
+
+local function torsoOf(ch)
+    return ch and (ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("Torso") or ch:FindFirstChild("HumanoidRootPart"))
+end
+
+-- TP shoot: equip DB -> save spot -> TP to target (upright) -> force-hit -> TP back ~1s
 local function tpShoot()
     local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
     local lc   = LocalPlayer.Character
     local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
     local thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
     if not lhrp or not thrp then return end
-    local saved    = lhrp.CFrame
-    local wasActive = (hc.forceHit.isActive and hc.forceHit.isActive()) or false
+    equipDoubleBarrel()
+    local saved     = lhrp.CFrame
+    local wasActive = hc.forceHit.isActive()
     hc.forceHit.setTarget(tgt)
     if not wasActive then hc.forceHit.start() end
-    lhrp.CFrame = thrp.CFrame * CFrame.new(0, 0, 4)
+    uprightTp(lc, lhrp, thrp.Position, thrp.CFrame.LookVector)
     task.wait(0.12)
     pcall(hc.forceHit.fire)
     task.spawn(function()
         task.wait(1)
-        if lhrp and lhrp.Parent then lhrp.CFrame = saved end
+        if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
         if not wasActive then hc.forceHit.stop() end
     end)
 end
@@ -244,45 +269,46 @@ local function gotoTarget()
     pcall(function() hook.players["goto"](tgt) end)
 end
 
--- Bring: TP-shoot, then TP on top of the target, fire the grab remote
--- (MainEvent "Grabbing"), and once our BodyEffects.Grabbed flips, TP back.
--- Pauses auto-stomp while grabbing and resumes it after.
+-- Bring: equip DB, TP to target (upright) + force-hit, pause auto-stomp, TP
+-- upright onto their UpperTorso, fire grab once, then TP back 0.5s AFTER our
+-- BodyEffects.Grabbed value changes; resume auto-stomp.
 local function bring()
     local tgt = activeTarget(); if not tgt then notify("No target", 2, "alert"); return end
     local lc   = LocalPlayer.Character
     local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
     if not lhrp then return end
     task.spawn(function()
+        equipDoubleBarrel()
         local saved = lhrp.CFrame
         local thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
         if not thrp then return end
-        -- TP-shoot
+        -- TP to target (upright) + shoot
         local wasFH = hc.forceHit.isActive()
         hc.forceHit.setTarget(tgt)
         if not wasFH then hc.forceHit.start() end
-        lhrp.CFrame = thrp.CFrame * CFrame.new(0, 0, 4)
+        uprightTp(lc, lhrp, thrp.Position, thrp.CFrame.LookVector)
         task.wait(0.12)
         pcall(hc.forceHit.fire)
         if not wasFH then hc.forceHit.stop() end
         -- pause auto-stomp before stacking on top
         local stompWasOn = hc.autoStomp.isActive()
         if stompWasOn then hc.autoStomp.stop() end
-        -- TP right on top + grab
-        thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-        if thrp then lhrp.CFrame = thrp.CFrame end
+        -- TP upright onto their UpperTorso
+        local part = torsoOf(tgt.Character)
+        if part then uprightTp(lc, lhrp, part.Position, lhrp.CFrame.LookVector) end
         task.wait(0.05)
+        -- grab once, watch our Grabbed value
         local fx       = lc:FindFirstChild("BodyEffects")
         local grab     = fx and fx:FindFirstChild("Grabbed")
         local startVal = grab and grab.Value
         pcall(function() ReplicatedStorage.MainEvent:FireServer("Grabbing") end)
-        -- wait until we've actually grabbed (Grabbed value changes), with timeout
         local t0 = os.clock()
         repeat
             task.wait()
             grab = fx and fx:FindFirstChild("Grabbed")
-        until (grab and grab.Value ~= startVal) or (os.clock() - t0 > 3) or not lhrp.Parent
-        -- TP back + resume auto-stomp
-        if lhrp and lhrp.Parent then lhrp.CFrame = saved end
+        until (grab and grab.Value ~= startVal) or (os.clock() - t0 > 5) or not lhrp.Parent
+        task.wait(0.5)   -- TP back 0.5s after the grab registers
+        if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
         if stompWasOn then hc.autoStomp.start() end
     end)
 end
