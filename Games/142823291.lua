@@ -22,8 +22,6 @@ if not mm2 then
     return
 end
 
-local UIS = game:GetService("UserInputService")
-
 local Main = Window:NewTab("Main")
 
 -- ---------- Identity ESP ----------
@@ -46,7 +44,8 @@ local function tryPickup()
     local ok, reason = mm2.pickupGun.fire()
     if not ok and reason and PICKUP_ERR[reason] then notify(PICKUP_ERR[reason], 3, "alert") end
 end
-Main:NewButton("Pickup gun now (H)", tryPickup)
+Main:NewButton("Pickup gun now", tryPickup)
+Main:NewKeybind("Pickup gun key", Enum.KeyCode.H, function() tryPickup() end)
 regToggle(Main, "MM2_AutoPickup", "Auto pickup gun", false, function(v)
     if v then mm2.autoPickupGun.start() else mm2.autoPickupGun.stop() end
 end)
@@ -76,15 +75,8 @@ local function tryShoot()
     local ok, reason = mm2.shootMurderer.fire()
     if not ok then notify(SHOOT_ERR[reason] or ("Shoot failed: " .. tostring(reason)), 3, "error") end
 end
-Main:NewButton("Shoot murderer (K)", tryShoot)
-
--- one-shot action keybinds: H = pickup gun, K = shoot murderer
-UIS.InputBegan:Connect(function(input, gp)
-    if gp or (library and library.Unloaded) then return end
-    if UIS:GetFocusedTextBox() then return end
-    if input.KeyCode == Enum.KeyCode.H then tryPickup()
-    elseif input.KeyCode == Enum.KeyCode.K then tryShoot() end
-end)
+Main:NewButton("Shoot murderer", tryShoot)
+Main:NewKeybind("Shoot murderer key", Enum.KeyCode.K, function() tryShoot() end)
 
 -- shared tabs (Movement/Desync/Visuals/World/Misc/Settings/Config) below
 api.buildShared()
