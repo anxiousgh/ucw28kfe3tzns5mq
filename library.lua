@@ -75,7 +75,9 @@ local library = {
     version = "2.0.2",
     title = title or "xsx " .. tostring(math.random(1,366)),
     fps = 0,
-    rank = "private"
+    rank = "private",
+    accentColor = Color3.fromRGB(232, 158, 255),
+    accentDark  = Color3.fromRGB(128, 94, 208),
 }
 
 coroutine.wrap(function()
@@ -200,6 +202,97 @@ function library:Remove()
     end
 end
 
+-- ---------- theming / appearance ----------
+library.themes = {
+    Witherhook = Color3.fromRGB(232, 158, 255),
+    Blood      = Color3.fromRGB(255, 60, 60),
+    Void       = Color3.fromRGB(150, 90, 255),
+    Toxic      = Color3.fromRGB(120, 255, 120),
+    Ice        = Color3.fromRGB(120, 200, 255),
+    Ember      = Color3.fromRGB(255, 150, 70),
+    Gold       = Color3.fromRGB(255, 210, 90),
+    Mono       = Color3.fromRGB(220, 220, 220),
+}
+
+local function _approxColor(a, b)
+    return math.abs(a.R - b.R) < 0.012 and math.abs(a.G - b.G) < 0.012 and math.abs(a.B - b.B) < 0.012
+end
+
+local function _recolor(inst, fromA, toA, fromB, toB)
+    for _, prop in ipairs({ "BackgroundColor3", "TextColor3", "ImageColor3", "ScrollBarImageColor3", "BorderColor3", "PlaceholderColor3" }) do
+        local ok, val = pcall(function() return inst[prop] end)
+        if ok and typeof(val) == "Color3" then
+            if _approxColor(val, fromA) then
+                inst[prop] = toA
+            elseif _approxColor(val, fromB) then
+                inst[prop] = toB
+            end
+        end
+    end
+    if inst:IsA("UIGradient") then
+        local changed, newKp = false, {}
+        for _, k in ipairs(inst.Color.Keypoints) do
+            local c = k.Value
+            if _approxColor(c, fromA) then c = toA; changed = true
+            elseif _approxColor(c, fromB) then c = toB; changed = true end
+            table.insert(newKp, ColorSequenceKeypoint.new(k.Time, c))
+        end
+        if changed then inst.Color = ColorSequence.new(newKp) end
+    end
+end
+
+-- Live re-theme: swaps the tracked accent (and its darker gradient
+-- companion) across every existing GUI instance, and updates the
+-- library.accentColor field so future tweens use the new colour too.
+function library:SetAccent(color)
+    if typeof(color) ~= "Color3" then return end
+    local fromA, fromB = library.accentColor, library.accentDark
+    local hh, ss, vv = Color3.toHSV(color)
+    local toA = color
+    local toB = Color3.fromHSV(hh, ss, vv * 0.806)
+    for _, name in ipairs({ "screen", "watermark", "Notifications" }) do
+        local gui = CoreGuiService:FindFirstChild(name)
+        if gui then
+            _recolor(gui, fromA, toA, fromB, toB)
+            for _, d in ipairs(gui:GetDescendants()) do
+                _recolor(d, fromA, toA, fromB, toB)
+            end
+        end
+    end
+    library.accentColor = toA
+    library.accentDark  = toB
+end
+
+function library:SetFont(font)
+    if typeof(font) ~= "EnumItem" then
+        font = Enum.Font[tostring(font)] or Enum.Font.Code
+    end
+    for _, name in ipairs({ "screen", "watermark", "Notifications" }) do
+        local gui = CoreGuiService:FindFirstChild(name)
+        if gui then
+            for _, d in ipairs(gui:GetDescendants()) do
+                if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+                    pcall(function() d.Font = font end)
+                end
+            end
+        end
+    end
+    library.currentFont = font
+end
+
+-- Uniform GUI scale via a UIScale on the window root.
+function library:SetScale(scale)
+    scale = tonumber(scale) or 1
+    local screen = CoreGuiService:FindFirstChild("screen")
+    if not screen then return end
+    local edge = screen:FindFirstChild("edge")
+    if not edge then return end
+    local uiscale = edge:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
+    uiscale.Scale = scale
+    uiscale.Parent = edge
+    library.currentScale = scale
+end
+
 function library:Watermark(text)
     for i,v in pairs(CoreGuiService:GetChildren()) do
         if v.Name == "watermark" then
@@ -267,7 +360,7 @@ function library:Watermark(text)
 
     bar.Name = "bar"
     bar.Parent = barFolder
-    bar.BackgroundColor3 = Color3.fromRGB(232, 158, 255)
+    bar.BackgroundColor3 = library.accentColor
     bar.BackgroundTransparency = 0
     bar.Size = UDim2.new(0, 0, 0, 1)
 
@@ -372,7 +465,7 @@ function library:Watermark(text)
     
         bar.Name = "bar"
         bar.Parent = barFolder
-        bar.BackgroundColor3 = Color3.fromRGB(232, 158, 255)
+        bar.BackgroundColor3 = library.accentColor
         bar.BackgroundTransparency = 0
         bar.Size = UDim2.new(0, 0, 0, 1)
     
@@ -570,11 +663,11 @@ function library:InitNotifications(text, duration, callback)
     
         bar.Name = "bar"
         bar.Parent = barFolder
-        bar.BackgroundColor3 = Color3.fromRGB(232, 158, 255)
+        bar.BackgroundColor3 = library.accentColor
         bar.BackgroundTransparency = 0.200
         bar.Size = UDim2.new(0, 0, 0, 1)
         if type == "notification" then
-            bar.BackgroundColor3 = Color3.fromRGB(232, 158, 255)
+            bar.BackgroundColor3 = library.accentColor
         elseif type == "alert" then
             bar.BackgroundColor3 = Color3.fromRGB(255, 246, 112)
         elseif type == "error" then
@@ -742,7 +835,7 @@ function library:Introduction()
     
     bar.Name = "bar"
     bar.Parent = barFolder
-    bar.BackgroundColor3 = Color3.fromRGB(232, 158, 255)
+    bar.BackgroundColor3 = library.accentColor
     bar.BackgroundTransparency = 0.200
     bar.Size = UDim2.new(0, 0, 0, 1)
     
@@ -764,7 +857,7 @@ function library:Introduction()
     xsxLogo.Size = UDim2.new(0, 448, 0, 150)
     xsxLogo.Visible = true
     xsxLogo.Image = "http://www.roblox.com/asset/?id=9365068051"
-    xsxLogo.ImageColor3 = Color3.fromRGB(232, 158, 255)
+    xsxLogo.ImageColor3 = library.accentColor
     xsxLogo.ImageTransparency = 1
     
     hashLogo.Name = "hashLogo"
@@ -776,7 +869,7 @@ function library:Introduction()
     hashLogo.Size = UDim2.new(0, 150, 0, 150)
     hashLogo.Visible = true
     hashLogo.Image = "http://www.roblox.com/asset/?id=9365069861"
-    hashLogo.ImageColor3 = Color3.fromRGB(232, 158, 255)
+    hashLogo.ImageColor3 = library.accentColor
     hashLogo.ImageTransparency = 1
     
     xsx.Name = "xsx"
@@ -948,7 +1041,7 @@ function library:Init(key)
 
     bar.Name = "bar"
     bar.Parent = barFolder
-    bar.BackgroundColor3 = Color3.fromRGB(232, 158, 255)
+    bar.BackgroundColor3 = library.accentColor
     bar.BackgroundTransparency = 0.200
     bar.Size = UDim2.new(0, 592, 0, 1)
     bar.BorderSizePixel = 0
@@ -1067,7 +1160,7 @@ function library:Init(key)
         page.MidImage = "http://www.roblox.com/asset/?id=3062506202"
         page.ScrollBarThickness = 1
         page.TopImage = "http://www.roblox.com/asset/?id=3062506202"
-        page.ScrollBarImageColor3 = Color3.fromRGB(232, 158, 255)
+        page.ScrollBarImageColor3 = library.accentColor
         page.Visible = false
         
         pageLayout.Name = "pageLayout"
@@ -1085,7 +1178,7 @@ function library:Init(key)
 
         if TabLibrary.IsFirst then
             page.Visible = true
-            tabButton.TextColor3 = Color3.fromRGB(232, 158, 255)
+            tabButton.TextColor3 = library.accentColor
             TabLibrary.CurrentTab = title
         end
         
@@ -1103,7 +1196,7 @@ function library:Init(key)
                     TweenService:Create(v, TweenTable["tab_text_colour"], {TextColor3 = Color3.fromRGB(170, 170, 170)}):Play()
                 end
             end
-            TweenService:Create(tabButton, TweenTable["tab_text_colour"], {TextColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+            TweenService:Create(tabButton, TweenTable["tab_text_colour"], {TextColor3 = library.accentColor}):Play()
         end)
 
         local function UpdatePageSize()
@@ -1272,7 +1365,7 @@ function library:Init(key)
             end)
 
             button.MouseButton1Down:Connect(function()
-                TweenService:Create(buttonLabel, TweenTable["hover"], {TextColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+                TweenService:Create(buttonLabel, TweenTable["hover"], {TextColor3 = library.accentColor}):Play()
             end)
             button.MouseButton1Up:Connect(function()
                 TweenService:Create(buttonLabel, TweenTable["hover"], {TextColor3 = Color3.fromRGB(190, 190, 190)}):Play()
@@ -1378,7 +1471,7 @@ function library:Init(key)
                     end)
         
                     button.MouseButton1Down:Connect(function()
-                        TweenService:Create(buttonLabel, TweenTable["hover"], {TextColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+                        TweenService:Create(buttonLabel, TweenTable["hover"], {TextColor3 = library.accentColor}):Play()
                     end)
                     button.MouseButton1Up:Connect(function()
                         TweenService:Create(buttonLabel, TweenTable["hover"], {TextColor3 = Color3.fromRGB(190, 190, 190)}):Play()
@@ -1634,7 +1727,7 @@ function library:Init(key)
             toggleDesignCorner.Name = "toggleDesignCorner"
             toggleDesignCorner.Parent = toggleDesign
 
-            toggleDesignGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(232, 158, 255)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(128, 94, 208))}
+            toggleDesignGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, library.accentColor), ColorSequenceKeypoint.new(1.00, library.accentDark)}
             toggleDesignGradient.Rotation = 90
             toggleDesignGradient.Name = "toggleDesignGradient"
             toggleDesignGradient.Parent = toggleDesign
@@ -2363,7 +2456,7 @@ function library:Init(key)
 
                 textBoxValues.Focused:Connect(function()
                     textBoxValues:GetPropertyChangedSignal("Text"):Connect(ResizeTextBox)
-                    TweenService:Create(textbox, TweenTable["TextBox"], {BackgroundColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+                    TweenService:Create(textbox, TweenTable["TextBox"], {BackgroundColor3 = library.accentColor}):Play()
                 end)
 
                 textBoxValues.FocusLost:Connect(function()
@@ -2592,7 +2685,7 @@ function library:Init(key)
                 end)
 
                 textBoxValues.Focused:Connect(function()
-                    TweenService:Create(textbox, TweenTable["TextBox"], {BackgroundColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+                    TweenService:Create(textbox, TweenTable["TextBox"], {BackgroundColor3 = library.accentColor}):Play()
                 end)
 
                 textBoxValues.FocusLost:Connect(function()
@@ -2821,7 +2914,7 @@ function library:Init(key)
                 end)
 
                 textBoxValues.Focused:Connect(function()
-                    TweenService:Create(textbox, TweenTable["TextBox"], {BackgroundColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+                    TweenService:Create(textbox, TweenTable["TextBox"], {BackgroundColor3 = library.accentColor}):Play()
                 end)
 
                 textBoxValues.FocusLost:Connect(function()
@@ -3060,7 +3153,7 @@ function library:Init(key)
                 optionButton.TextColor3 = Color3.fromRGB(160, 160, 160)
                 optionButton.TextSize = 14.000
                 if optionButton.Text == default then
-                    optionButton.TextColor3 = Color3.fromRGB(232, 158, 255)
+                    optionButton.TextColor3 = library.accentColor
                     callback(selectorText.Text)
                 end
 
@@ -3070,7 +3163,7 @@ function library:Init(key)
                             TweenService:Create(x, TweenTable["selector"], {TextColor3 = Color3.fromRGB(160, 160, 160)}):Play()
                         end
                     end
-                    TweenService:Create(optionButton, TweenTable["selector"], {TextColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+                    TweenService:Create(optionButton, TweenTable["selector"], {TextColor3 = library.accentColor}):Play()
                     selectorText.Text = optionButton.Text
                     callback(optionButton.Text)
                 end)
@@ -3106,7 +3199,7 @@ function library:Init(key)
                 optionButton.TextColor3 = Color3.fromRGB(140, 140, 140)
                 optionButton.TextSize = 14.000
                 if optionButton.Text == default then
-                    optionButton.TextColor3 = Color3.fromRGB(232, 158, 255)
+                    optionButton.TextColor3 = library.accentColor
                     callback(selectorText.Text)
                 end
 
@@ -3116,7 +3209,7 @@ function library:Init(key)
                             TweenService:Create(x, TweenTable["selector"], {TextColor3 = Color3.fromRGB(140, 140, 140)}):Play()
                         end
                     end
-                    TweenService:Create(optionButton, TweenTable["selector"], {TextColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+                    TweenService:Create(optionButton, TweenTable["selector"], {TextColor3 = library.accentColor}):Play()
                     selectorText.Text = optionButton.Text
                     callback(optionButton.Text)
                 end)
@@ -3204,7 +3297,7 @@ function library:Init(key)
             local COLLAPSED_H = 46
             local OPTION_H    = 20
             local GREY        = Color3.fromRGB(160, 160, 160)
-            local PURPLE      = Color3.fromRGB(232, 158, 255)
+            local PURPLE      = library.accentColor
             local placeholder = ". . ."
 
             -- single: selected string | nil   multi: set { [opt]=true }
@@ -3457,6 +3550,19 @@ function library:Init(key)
                 return DropdownFunctions
             end
 
+            -- Replace the whole option list (clears current selection).
+            function DropdownFunctions:SetOptions(newList)
+                for _, x in ipairs(optionsHolder:GetChildren()) do
+                    if x:IsA("TextButton") then x:Destroy() end
+                end
+                selectedSet = {}
+                single = nil
+                for _, v in ipairs(newList or {}) do makeOption(v) end
+                refreshDisplay()
+                resize()
+                return DropdownFunctions
+            end
+
             -- single: pass a string. multi: pass a string (toggles on) or an array.
             function DropdownFunctions:Set(value)
                 if multi then
@@ -3616,7 +3722,7 @@ function library:Init(key)
             sliderIndicatorStraint.Parent = sliderIndicator
             sliderIndicatorStraint.MaxSize = Vector2.new(392, 12)
 
-            sliderIndicatorGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(232, 158, 255)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(128, 94, 208))}
+            sliderIndicatorGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, library.accentColor), ColorSequenceKeypoint.new(1.00, library.accentDark)}
             sliderIndicatorGradient.Rotation = 90
             sliderIndicatorGradient.Name = "sliderIndicatorGradient"
             sliderIndicatorGradient.Parent = sliderIndicator
@@ -3856,7 +3962,7 @@ function library:Init(key)
                     TweenService:Create(v, TweenTable["tab_text_colour"], {TextColor3 = Color3.fromRGB(170, 170, 170)}):Play()
                 end
             end
-            TweenService:Create(tabButton, TweenTable["tab_text_colour"], {TextColor3 = Color3.fromRGB(232, 158, 255)}):Play()
+            TweenService:Create(tabButton, TweenTable["tab_text_colour"], {TextColor3 = library.accentColor}):Play()
 
             return Components
         end

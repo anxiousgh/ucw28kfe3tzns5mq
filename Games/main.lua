@@ -1,12 +1,15 @@
 -- ============================================================
 --  witherhook // Games/main.lua
---  Shared feature set loaded for EVERY game: Movement + Misc.
---  Wired to the decay backend (functions.lua -> F).
+--  Shared feature set for EVERY game: Movement, Misc, Settings, Config.
+--  Wired to the decay backend (functions.lua -> hook).
 -- ============================================================
 local ctx     = ({ ... })[1]
 local library = ctx.library
 local Window  = ctx.window
 local Notif   = ctx.notif
+
+local HttpService        = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local function notify(text, dur, kind)
     if Notif then pcall(function() Notif:Notify(text, dur or 4, kind or "information") end) end
@@ -25,102 +28,138 @@ do
 end
 
 -- ============================================================
+--  PERSISTENCE (executor file API, all guarded)
+-- ============================================================
+local hasFS = (typeof(writefile) == "function")
+    and (typeof(readfile) == "function") and (typeof(isfile) == "function")
+
+local ROOT      = "witherhook"
+local CFG_ROOT  = ROOT .. "/configs"
+local UNI_DIR   = CFG_ROOT .. "/universal"
+local placeId   = tostring(ctx.gameKey or "0")
+local GAME_DIR  = CFG_ROOT .. "/games/" .. placeId
+local SETTINGS_PATH = ROOT .. "/settings.json"
+local AUTOLOAD_PATH = ROOT .. "/autoload.json"
+
+local function ensureFolder(path)
+    if typeof(makefolder) == "function" and typeof(isfolder) == "function" then
+        if not isfolder(path) then pcall(makefolder, path) end
+    end
+end
+local function writeJSON(path, tbl)
+    if not hasFS then return false end
+    local ok, enc = pcall(function() return HttpService:JSONEncode(tbl) end)
+    if not ok then return false end
+    return (pcall(writefile, path, enc))
+end
+local function readJSON(path)
+    if not hasFS or not isfile(path) then return nil end
+    local ok, data = pcall(readfile, path)
+    if not ok then return nil end
+    local ok2, dec = pcall(function() return HttpService:JSONDecode(data) end)
+    if ok2 then return dec end
+    return nil
+end
+local function listConfigs(folder)
+    local names = {}
+    if typeof(listfiles) == "function" and typeof(isfolder) == "function" and isfolder(folder) then
+        for _, f in ipairs(listfiles(folder)) do
+            local name = f:match("([^/\\]+)%.json$")
+            if name then table.insert(names, name) end
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+if hasFS then
+    ensureFolder(ROOT); ensureFolder(CFG_ROOT); ensureFolder(UNI_DIR)
+    ensureFolder(CFG_ROOT .. "/games"); ensureFolder(GAME_DIR)
+end
+
+-- ============================================================
+--  FLAG REGISTRY (config save/load operates on these)
+-- ============================================================
+local flags    = {}   -- key -> current value
+local controls = {}   -- key -> { set = fn(value) }
+
+local function regToggle(tab, key, text, default, cb)
+    flags[key] = default
+    local h = tab:NewToggle(text, default, function(v) flags[key] = v; if cb then cb(v) end end)
+    controls[key] = { set = function(v) h:Set(v and true or false) end }
+    return h
+end
+local function regSlider(tab, key, text, suffix, vals, cb)
+    flags[key] = vals.default
+    local h = tab:NewSlider(text, suffix, false, "/", vals,
+        function(v) flags[key] = v; if cb then cb(v) end end)
+    -- Slider:Value only updates visuals, so re-fire the callback on apply
+    controls[key] = { set = function(v) h:Value(v); flags[key] = v; if cb then cb(v) end end }
+    return h
+end
+local function regDropdown(tab, key, text, default, list, multi, cb)
+    flags[key] = default
+    local h = tab:NewDropdown(text, default, list, multi,
+        function(v) flags[key] = v; if cb then cb(v) end end)
+    controls[key] = { set = function(v) h:Set(v) end }   -- Dropdown:Set fires cb
+    return h
+end
+
+-- ============================================================
 --  MOVEMENT
 -- ============================================================
 local Movement = Window:NewTab("Movement")
 
 Movement:NewSection("Movement")
-
-Movement:NewToggle("Fly", false, function(v)
-    if v then hook.fly.start() else hook.fly.stop() end
-end)
-Movement:NewSlider("Fly speed", "", false, "/",
-    { min = 5, max = 3000, default = hook.fly.getSpeed() or 60 },
+regToggle(Movement, "Fly", "Fly", false, function(v) if v then hook.fly.start() else hook.fly.stop() end end)
+regSlider(Movement, "FlySpeed", "Fly speed", "", { min = 5, max = 3000, default = hook.fly.getSpeed() or 60 },
     function(v) hook.fly.setSpeed(v) end)
 
-Movement:NewToggle("Walkspeed", false, function(v)
-    if v then hook.walkspeed.start() else hook.walkspeed.stop() end
-end)
-Movement:NewSlider("Walkspeed value", "", false, "/",
-    { min = 8, max = 1000, default = hook.walkspeed.getValue() or 50 },
+regToggle(Movement, "Walkspeed", "Walkspeed", false, function(v) if v then hook.walkspeed.start() else hook.walkspeed.stop() end end)
+regSlider(Movement, "WalkspeedValue", "Walkspeed value", "", { min = 8, max = 1000, default = hook.walkspeed.getValue() or 50 },
     function(v) hook.walkspeed.setValue(v) end)
 
-Movement:NewToggle("Jump power", false, function(v)
-    if v then hook.jumpPower.start() else hook.jumpPower.stop() end
-end)
-Movement:NewSlider("Jump power value", "", false, "/",
-    { min = 0, max = 2000, default = hook.jumpPower.getValue() or 50 },
+regToggle(Movement, "JumpPower", "Jump power", false, function(v) if v then hook.jumpPower.start() else hook.jumpPower.stop() end end)
+regSlider(Movement, "JumpPowerValue", "Jump power value", "", { min = 0, max = 2000, default = hook.jumpPower.getValue() or 50 },
     function(v) hook.jumpPower.setValue(v) end)
 
-Movement:NewToggle("CFrame speed", false, function(v)
-    if v then hook.cframeSpeed.start(hook.cframeSpeed.getMultiplier()) else hook.cframeSpeed.stop() end
-end)
-Movement:NewSlider("CFrame speed multiplier", "x", false, "/",
-    { min = 1, max = 100, default = hook.cframeSpeed.getMultiplier() or 2 },
+regToggle(Movement, "CFrameSpeed", "CFrame speed", false,
+    function(v) if v then hook.cframeSpeed.start(hook.cframeSpeed.getMultiplier()) else hook.cframeSpeed.stop() end end)
+regSlider(Movement, "CFrameMult", "CFrame speed multiplier", "x", { min = 1, max = 100, default = hook.cframeSpeed.getMultiplier() or 2 },
     function(v) hook.cframeSpeed.setMultiplier(v) end)
 
--- forceJump, renamed per request
-Movement:NewToggle("Allow jump", false, function(v)
-    if v then hook.forceJump.start() else hook.forceJump.stop() end
-end)
+regToggle(Movement, "AllowJump", "Allow jump", false, function(v) if v then hook.forceJump.start() else hook.forceJump.stop() end end)
 
 -- ---------- CSGO HVH movement ----------
 Movement:NewSection("CSGO HVH movement")
-Movement:NewToggle("HVH enabled", false, function(v)
-    if v then hook.hvhMovement.start() else hook.hvhMovement.stop() end
-end)
-Movement:NewSlider("Jiggle amount min", " deg", false, "/",
-    { min = 0, max = 180, default = 15 }, function(v) hook.hvhMovement.setJiggleAmountMin(v) end)
-Movement:NewSlider("Jiggle amount max", " deg", false, "/",
-    { min = 0, max = 180, default = 35 }, function(v) hook.hvhMovement.setJiggleAmountMax(v) end)
--- Xsx slider is integer-only, so HVH frequency is whole Hz here
-Movement:NewSlider("Jiggle freq min", " Hz", false, "/",
-    { min = 1, max = 30, default = 1 }, function(v) hook.hvhMovement.setJiggleFreqMin(v) end)
-Movement:NewSlider("Jiggle freq max", " Hz", false, "/",
-    { min = 1, max = 30, default = 3 }, function(v) hook.hvhMovement.setJiggleFreqMax(v) end)
+regToggle(Movement, "HVH", "HVH enabled", false, function(v) if v then hook.hvhMovement.start() else hook.hvhMovement.stop() end end)
+regSlider(Movement, "HVHAmtMin", "Jiggle amount min", " deg", { min = 0, max = 180, default = 15 }, function(v) hook.hvhMovement.setJiggleAmountMin(v) end)
+regSlider(Movement, "HVHAmtMax", "Jiggle amount max", " deg", { min = 0, max = 180, default = 35 }, function(v) hook.hvhMovement.setJiggleAmountMax(v) end)
+regSlider(Movement, "HVHFreqMin", "Jiggle freq min", " Hz", { min = 1, max = 30, default = 1 }, function(v) hook.hvhMovement.setJiggleFreqMin(v) end)
+regSlider(Movement, "HVHFreqMax", "Jiggle freq max", " Hz", { min = 1, max = 30, default = 3 }, function(v) hook.hvhMovement.setJiggleFreqMax(v) end)
 
 -- ---------- Extras ----------
 Movement:NewSection("Extras")
-Movement:NewToggle("Spin", false, function(v)
-    if v then hook.spin.start() else hook.spin.stop() end
-end)
-Movement:NewSlider("Spin speed", "", false, "/",
-    { min = 1, max = 1000, default = 50 }, function(v) hook.spin.setSpeed(v) end)
+regToggle(Movement, "Spin", "Spin", false, function(v) if v then hook.spin.start() else hook.spin.stop() end end)
+regSlider(Movement, "SpinSpeed", "Spin speed", "", { min = 1, max = 1000, default = 50 }, function(v) hook.spin.setSpeed(v) end)
 
--- Upside down / Tilt are mutually exclusive (don't compound orientation spoofs)
+-- Upside down / Tilt are mutually exclusive
 local flipT, tiltT
-flipT = Movement:NewToggle("Upside down", false, function(v)
-    if v then
-        if tiltT then tiltT:Set(false) end
-        hook.flip.start()
-    else
-        hook.flip.stop()
-    end
+flipT = regToggle(Movement, "UpsideDown", "Upside down", false, function(v)
+    if v then if tiltT then tiltT:Set(false) end; hook.flip.start() else hook.flip.stop() end
 end)
-tiltT = Movement:NewToggle("Tilt sideways", false, function(v)
-    if v then
-        if flipT then flipT:Set(false) end
-        hook.tilt.start()
-    else
-        hook.tilt.stop()
-    end
+tiltT = regToggle(Movement, "TiltSideways", "Tilt sideways", false, function(v)
+    if v then if flipT then flipT:Set(false) end; hook.tilt.start() else hook.tilt.stop() end
 end)
 
-Movement:NewToggle("Ice slide", false, function(v)
-    if v then hook.ice.start() else hook.ice.stop() end
-end)
--- friction 0.50-0.99 shown as 50-99 (slider is integer-only)
-Movement:NewSlider("Slide friction", "%", false, "/",
-    { min = 50, max = 99, default = 98 }, function(v) hook.ice.setSlide(v / 100) end)
+regToggle(Movement, "IceSlide", "Ice slide", false, function(v) if v then hook.ice.start() else hook.ice.stop() end end)
+regSlider(Movement, "IceFriction", "Slide friction", "%", { min = 50, max = 99, default = 98 }, function(v) hook.ice.setSlide(v / 100) end)
 
 -- ---------- Desync ----------
 Movement:NewSection("Desync")
-
-local desyncMode = "Void"
-local desyncOn   = false
+local desyncMode, desyncOn = "Void", false
 local desyncMin, desyncMax = 5000, 20000
 local desyncEnableT
-
 local MODE_START = {
     Void     = function() hook.desync.startVoid()     return true end,
     Sky      = function() hook.desync.startSky()      return true end,
@@ -132,74 +171,191 @@ local MODE_START = {
         return ok
     end,
 }
-
-Movement:NewDropdown("Desync mode", "Void",
-    { "Void", "Sky", "Spin", "Velocity", "Raknet" }, false,
-    function(v)
-        desyncMode = v
-        if desyncOn then
-            hook.desync.stop()
-            local starter = MODE_START[v]
-            if not starter or not starter() then
-                if desyncEnableT then desyncEnableT:Set(false) end
-            end
-        end
-    end)
-
-desyncEnableT = Movement:NewToggle("Enable desync", false, function(v)
+regDropdown(Movement, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet" }, false, function(v)
+    desyncMode = v
+    if desyncOn then
+        hook.desync.stop()
+        local starter = MODE_START[v]
+        if not starter or not starter() then if desyncEnableT then desyncEnableT:Set(false) end end
+    end
+end)
+desyncEnableT = regToggle(Movement, "DesyncEnabled", "Enable desync", false, function(v)
     desyncOn = v
     if v then
         local starter = MODE_START[desyncMode]
-        if not starter or not starter() then
-            if desyncEnableT then desyncEnableT:Set(false) end
-        end
+        if not starter or not starter() then if desyncEnableT then desyncEnableT:Set(false) end end
     else
         hook.desync.stop()
     end
 end)
-
-Movement:NewSlider("Void min distance", "", false, "/",
-    { min = 500, max = 100000, default = 5000 },
+regSlider(Movement, "DesyncMin", "Void min distance", "", { min = 500, max = 100000, default = 5000 },
     function(v) desyncMin = v; hook.desync.setRange(desyncMin, desyncMax) end)
-Movement:NewSlider("Void max distance", "", false, "/",
-    { min = 500, max = 100000, default = 20000 },
+regSlider(Movement, "DesyncMax", "Void max distance", "", { min = 500, max = 100000, default = 20000 },
     function(v) desyncMax = v; hook.desync.setRange(desyncMin, desyncMax) end)
-Movement:NewSlider("Spin speed (deg/frame)", "", false, "/",
-    { min = 1, max = 360, default = 47 }, function(v) hook.desync.setSpinSpeed(v) end)
-Movement:NewSlider("Velocity magnitude", "", false, "/",
-    { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
-Movement:NewSlider("Sky height", "", false, "/",
-    { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
+regSlider(Movement, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", { min = 1, max = 360, default = 47 }, function(v) hook.desync.setSpinSpeed(v) end)
+regSlider(Movement, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
+regSlider(Movement, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
 
 -- ============================================================
 --  MISC
 -- ============================================================
 local Misc = Window:NewTab("Misc")
-
 Misc:NewSection("Anti-fling")
-Misc:NewToggle("Anti-fling", false, function(v)
-    if v then hook.antiFling.start() else hook.antiFling.stop() end
-end)
-Misc:NewSlider("Velocity cap", " stud/sec", false, "/",
-    { min = 100, max = 50000, default = 5000 }, function(v) hook.antiFling.setCap(v) end)
+regToggle(Misc, "AntiFling", "Anti-fling", false, function(v) if v then hook.antiFling.start() else hook.antiFling.stop() end end)
+regSlider(Misc, "AntiFlingCap", "Velocity cap", " stud/sec", { min = 100, max = 50000, default = 5000 }, function(v) hook.antiFling.setCap(v) end)
 
 Misc:NewSection("Enable chat")
-Misc:NewToggle("Re-enable chat", false, function(v)
-    if v then hook.forceChat.start() else hook.forceChat.stop() end
-end)
+regToggle(Misc, "ForceChat", "Re-enable chat", false, function(v) if v then hook.forceChat.start() else hook.forceChat.stop() end end)
 
 Misc:NewSection("Proximity prompts")
-Misc:NewToggle("Instant activation", false, function(v)
-    if v then hook.prompts.instantActivation.start() else hook.prompts.instantActivation.stop() end
+regToggle(Misc, "PromptInstant", "Instant activation", false, function(v) if v then hook.prompts.instantActivation.start() else hook.prompts.instantActivation.stop() end end)
+regToggle(Misc, "PromptRange",   "Unlimited range",   false, function(v) if v then hook.prompts.unlimitedRange.start()  else hook.prompts.unlimitedRange.stop()  end end)
+regToggle(Misc, "PromptWalls",   "Through walls",     false, function(v) if v then hook.prompts.throughWalls.start()    else hook.prompts.throughWalls.stop()    end end)
+regToggle(Misc, "PromptAutoFire","Auto-fire",         false, function(v) if v then hook.prompts.autoFire.start()        else hook.prompts.autoFire.stop()        end end)
+
+-- ============================================================
+--  SETTINGS  (universal GUI prefs, autosaved, NOT part of configs)
+-- ============================================================
+local settings = readJSON(SETTINGS_PATH) or {}
+local function saveSettings() writeJSON(SETTINGS_PATH, settings) end
+
+local Settings = Window:NewTab("Settings")
+Settings:NewSection("Appearance (universal, autosaved)")
+
+local themeNames = {}
+for name in pairs(library.themes) do table.insert(themeNames, name) end
+table.sort(themeNames)
+
+Settings:NewDropdown("Theme", settings.theme or "Witherhook", themeNames, false, function(v)
+    local c = library.themes[v]
+    if c then library:SetAccent(c); settings.theme = v; saveSettings() end
 end)
-Misc:NewToggle("Unlimited range", false, function(v)
-    if v then hook.prompts.unlimitedRange.start() else hook.prompts.unlimitedRange.stop() end
+
+local fontNames = { "Code", "Gotham", "GothamBold", "GothamBlack", "SourceSans", "SourceSansBold",
+    "Roboto", "RobotoMono", "Arcade", "Fantasy", "Antique", "Michroma", "Ubuntu" }
+Settings:NewDropdown("Font", settings.font or "Code", fontNames, false, function(v)
+    library:SetFont(v); settings.font = v; saveSettings()
 end)
-Misc:NewToggle("Through walls", false, function(v)
-    if v then hook.prompts.throughWalls.start() else hook.prompts.throughWalls.stop() end
+
+Settings:NewSlider("UI scale", "%", false, "/", { min = 50, max = 150, default = settings.scale or 100 }, function(v)
+    library:SetScale(v / 100); settings.scale = v; saveSettings()
 end)
-Misc:NewToggle("Auto-fire", false, function(v)
-    if v then hook.prompts.autoFire.start() else hook.prompts.autoFire.stop() end
+
+-- ============================================================
+--  CONFIG  (universal + per-game, save/load/delete/autoload)
+-- ============================================================
+local autoload = readJSON(AUTOLOAD_PATH) or { universal = false, games = {} }
+autoload.games = autoload.games or {}
+local function saveAutoload() writeJSON(AUTOLOAD_PATH, autoload) end
+
+local function snapshot()
+    local s = {}
+    for k, v in pairs(flags) do s[k] = v end
+    return s
+end
+local function applyConfig(data)
+    if type(data) ~= "table" then return end
+    for k, v in pairs(data) do
+        if controls[k] then pcall(controls[k].set, v) end
+    end
+end
+local function saveConfig(dir, name)
+    if not name or name == "" then return notify("Enter a config name first", 3, "alert") end
+    if not hasFS then return notify("No file API in this executor", 4, "error") end
+    ensureFolder(dir)
+    if writeJSON(dir .. "/" .. name .. ".json", snapshot()) then
+        notify("Saved config: " .. name, 3, "success")
+    else
+        notify("Save failed", 4, "error")
+    end
+end
+local function loadConfig(dir, name)
+    if not name or name == "" then return notify("Select a config first", 3, "alert") end
+    local data = readJSON(dir .. "/" .. name .. ".json")
+    if data then applyConfig(data); notify("Loaded config: " .. name, 3, "success")
+    else notify("Config not found: " .. tostring(name), 3, "error") end
+end
+local function deleteConfig(dir, name)
+    if not name or name == "" then return end
+    if typeof(delfile) == "function" and isfile(dir .. "/" .. name .. ".json") then
+        pcall(delfile, dir .. "/" .. name .. ".json")
+        notify("Deleted config: " .. name, 3, "success")
+    end
+end
+
+local Config = Window:NewTab("Config")
+
+-- resolve this game's display name (best effort)
+local gameName = "Game " .. placeId
+pcall(function()
+    local info = MarketplaceService:GetProductInfo(tonumber(placeId))
+    if info and info.Name then gameName = info.Name end
+end)
+
+-- ---------- Universal configs ----------
+Config:NewSection("Universal configs (all games)")
+local uniNameVal, uniSel = "", nil
+Config:NewTextbox("New universal config name", "", "name", "all", "medium", true, false, function(v) uniNameVal = v end)
+local uniList = Config:NewDropdown("Saved universal configs", "—", listConfigs(UNI_DIR), false, function(v) uniSel = v end)
+local uniAutoLabel = Config:NewLabel("Autoload: " .. tostring(autoload.universal or "none"), "left")
+
+local function refreshUni()
+    local list = listConfigs(UNI_DIR)
+    if #list == 0 then list = { "—" } end
+    uniList:SetOptions(list)
+    uniAutoLabel:Text("Autoload: " .. tostring(autoload.universal or "none"))
+end
+
+Config:NewButton("Save universal", function() saveConfig(UNI_DIR, uniNameVal); refreshUni() end)
+:AddButton("Load universal", function() loadConfig(UNI_DIR, uniSel) end)
+Config:NewButton("Delete universal", function() deleteConfig(UNI_DIR, uniSel); refreshUni() end)
+:AddButton("Refresh", function() refreshUni() end)
+Config:NewButton("Set autoload (universal)", function()
+    if uniSel and uniSel ~= "—" then autoload.universal = uniSel; saveAutoload(); refreshUni(); notify("Autoload set: " .. uniSel, 3, "success") end
+end)
+:AddButton("Clear autoload (universal)", function()
+    autoload.universal = false; saveAutoload(); refreshUni(); notify("Universal autoload cleared", 3, "information")
+end)
+
+-- ---------- Game configs ----------
+Config:NewSection("Game configs — " .. gameName)
+local gameNameVal, gameSel = "", nil
+Config:NewTextbox("New game config name", "", "name", "all", "medium", true, false, function(v) gameNameVal = v end)
+local gameListD = Config:NewDropdown("Saved game configs", "—", listConfigs(GAME_DIR), false, function(v) gameSel = v end)
+local gameAutoLabel = Config:NewLabel("Autoload: " .. tostring(autoload.games[placeId] or "none"), "left")
+
+local function refreshGame()
+    local list = listConfigs(GAME_DIR)
+    if #list == 0 then list = { "—" } end
+    gameListD:SetOptions(list)
+    gameAutoLabel:Text("Autoload: " .. tostring(autoload.games[placeId] or "none"))
+end
+
+Config:NewButton("Save game", function() saveConfig(GAME_DIR, gameNameVal); refreshGame() end)
+:AddButton("Load game", function() loadConfig(GAME_DIR, gameSel) end)
+Config:NewButton("Delete game", function() deleteConfig(GAME_DIR, gameSel); refreshGame() end)
+:AddButton("Refresh", function() refreshGame() end)
+Config:NewButton("Set autoload (game)", function()
+    if gameSel and gameSel ~= "—" then autoload.games[placeId] = gameSel; saveAutoload(); refreshGame(); notify("Game autoload set: " .. gameSel, 3, "success") end
+end)
+:AddButton("Clear autoload (game)", function()
+    autoload.games[placeId] = false; saveAutoload(); refreshGame(); notify("Game autoload cleared", 3, "information")
+end)
+
+-- ============================================================
+--  APPLY universal settings, then autoload a config
+-- ============================================================
+library:SetAccent(library.themes[settings.theme or "Witherhook"] or library.themes.Witherhook)
+library:SetFont(settings.font or "Code")
+library:SetScale((settings.scale or 100) / 100)
+
+task.defer(function()
+    local gName = autoload.games[placeId]
+    if gName and gName ~= false then
+        loadConfig(GAME_DIR, gName)
+    elseif autoload.universal and autoload.universal ~= false then
+        loadConfig(UNI_DIR, autoload.universal)
+    end
 end)
 
 notify("witherhook ready", 3, "success")
