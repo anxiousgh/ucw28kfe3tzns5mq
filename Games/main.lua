@@ -654,6 +654,10 @@ Config:NewButton("Save", function() saveConfig(CFG_DIR, cfgNameVal); refreshCfg(
 :AddButton("Load", function() loadConfig(CFG_DIR, cfgSel) end)
 Config:NewButton("Delete", function() deleteConfig(CFG_DIR, cfgSel); refreshCfg() end)
 :AddButton("Refresh", function() refreshCfg() end)
+Config:NewButton("Overwrite selected", function()
+    if cfgSel and cfgSel ~= "—" then saveConfig(CFG_DIR, cfgSel); refreshCfg()
+    else notify("Select a config to overwrite", 3, "alert") end
+end)
 Config:NewButton("Set autoload", function()
     if cfgSel and cfgSel ~= "—" then setAuto(cfgSel); saveAutoload(); refreshCfg(); notify("Autoload set: " .. cfgSel, 3, "success") end
 end)
