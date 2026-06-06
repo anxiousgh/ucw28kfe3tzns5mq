@@ -1098,21 +1098,53 @@ function library:Init(key)
     drag(edge, 0.04)
     local CanChangeVisibility = true
 
-    -- The window content lives in a CanvasGroup (set up just below), so the
-    -- show/hide hotkey fades EVERYTHING with a single GroupTransparency
-    -- tween -- no per-element walk, so no frame hitch / freeze.
-    local contentGroup
+    -- Fade the window on the show/hide hotkey. Walks only VISIBLE elements
+    -- (skips hidden tab pages), so it touches ~the active tab's content
+    -- instead of every descendant -> no freeze, and no CanvasGroup (which
+    -- broke the scrolling pages' layout). IsA checks avoid pcall.
     local windowHidden = false
+    local fadeToken = 0
     local FADE_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-    local function fadeWindow(hide)
-        local target = hide and 1 or 0
-        if not hide then edge.Visible = true end
-        if contentGroup then
-            TweenService:Create(contentGroup, FADE_INFO, { GroupTransparency = target }):Play()
+    local function propsFor(d)
+        if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+            return { "BackgroundTransparency", "TextTransparency" }
+        elseif d:IsA("ImageLabel") or d:IsA("ImageButton") then
+            return { "BackgroundTransparency", "ImageTransparency" }
+        else
+            return { "BackgroundTransparency" }
         end
-        TweenService:Create(edge, FADE_INFO, { BackgroundTransparency = target }):Play()
+    end
+    local function fadeWalk(inst, hide)
+        for _, d in ipairs(inst:GetChildren()) do
+            if d:IsA("GuiObject") then
+                for _, p in ipairs(propsFor(d)) do
+                    if hide then
+                        local v = d[p]
+                        if type(v) == "number" and v < 1 then
+                            d:SetAttribute("_whF_" .. p, v)
+                            TweenService:Create(d, FADE_INFO, { [p] = 1 }):Play()
+                        end
+                    else
+                        local base = d:GetAttribute("_whF_" .. p)
+                        if base ~= nil then TweenService:Create(d, FADE_INFO, { [p] = base }):Play() end
+                    end
+                end
+                if d.Visible then fadeWalk(d, hide) end   -- skip hidden subtrees
+            end
+        end
+    end
+    local function fadeWindow(hide)
+        fadeToken = fadeToken + 1
+        local myToken = fadeToken
+        if not hide then edge.Visible = true end
+        fadeWalk(edge, hide)
         if hide then
-            task.delay(0.21, function() if windowHidden then edge.Visible = false end end)
+            edge:SetAttribute("_whF_BackgroundTransparency", edge.BackgroundTransparency)
+            TweenService:Create(edge, FADE_INFO, { BackgroundTransparency = 1 }):Play()
+            task.delay(0.22, function() if myToken == fadeToken then edge.Visible = false end end)
+        else
+            local base = edge:GetAttribute("_whF_BackgroundTransparency")
+            if base ~= nil then TweenService:Create(edge, FADE_INFO, { BackgroundTransparency = base }):Play() end
         end
     end
 
@@ -1128,20 +1160,8 @@ function library:Init(key)
     edgeCorner.Name = "edgeCorner"
     edgeCorner.Parent = edge
 
-    contentGroup = Instance.new("CanvasGroup")
-    contentGroup.Name = "contentGroup"
-    contentGroup.AnchorPoint = Vector2.new(0.5, 0.5)
-    contentGroup.Position = UDim2.new(0.5, 0, 0.5, 0)
-    contentGroup.Size = UDim2.new(1, 0, 1, 0)
-    contentGroup.BackgroundTransparency = 1
-    contentGroup.BorderSizePixel = 0
-    contentGroup.Parent = edge
-    local contentGroupCorner = Instance.new("UICorner")
-    contentGroupCorner.CornerRadius = UDim.new(0, 2)
-    contentGroupCorner.Parent = contentGroup
-
     background.Name = "background"
-    background.Parent = contentGroup
+    background.Parent = edge
     background.AnchorPoint = Vector2.new(0.5, 0.5)
     background.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     background.Position = UDim2.new(0.5, 0, 0.5, 0)
