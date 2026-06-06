@@ -1795,17 +1795,17 @@ RunService.RenderStepped:Connect(function(dt)
                 local dx, dy = sp.X - mp.X, sp.Y - mp.Y
                 local dist = math.sqrt(dx * dx + dy * dy)
                 if dist > 0.5 then
-                    local mvx, mvy
-                    if dist <= 3 then
-                        -- close enough: snap the last few pixels onto the target.
-                        -- (smoothing here would round to sub-pixel and stall)
-                        mvx, mvy = dx, dy
-                    else
-                        mvx, mvy = dx * alpha, dy * alpha
-                        -- never let a smoothed step round down to 0px, or it
-                        -- stops moving just short of the target
-                        if math.abs(mvx) < 1 and math.abs(mvy) < 1 then
-                            mvx, mvy = dx / dist, dy / dist
+                    -- pure smoothed step (Smoothing controls the speed). Low
+                    -- smoothing -> alpha near 1 -> effectively snaps on its own.
+                    local mvx, mvy = dx * alpha, dy * alpha
+                    -- only floor to a 1px step so a sub-pixel value doesn't
+                    -- round to 0 and stall just short of the target -- this is
+                    -- the minimum to converge, not a snap
+                    if math.abs(mvx) < 1 and math.abs(mvy) < 1 then
+                        if dist <= 1 then
+                            mvx, mvy = dx, dy           -- close the final pixel exactly
+                        else
+                            mvx, mvy = dx / dist, dy / dist  -- 1px toward target
                         end
                     end
                     pcall(_mouseMoveRel, mvx, mvy)
