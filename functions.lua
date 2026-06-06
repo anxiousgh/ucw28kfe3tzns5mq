@@ -1657,6 +1657,11 @@ local function lpHasTool()
     return c ~= nil and c:FindFirstChildOfClass("Tool") ~= nil
 end
 
+-- relative mouse-move (executor global) used by camlock "Mouse" mode; nil if
+-- the executor doesn't expose it
+local _mouseMoveRel = nil
+pcall(function() _mouseMoveRel = mousemoverel end)
+
 local function clIsVisible(plr)
     local char=plr.Character; local lchar=lplr.Character
     if not char or not lchar then return false end
@@ -1779,11 +1784,20 @@ RunService.RenderStepped:Connect(function(dt)
         and (part.Position + (part.AssemblyLinearVelocity * CamLockSettings.PredictionAmount))
         or part.Position
     local cam = workspace.CurrentCamera
-    local desired = CFrame.new(cam.CFrame.Position, targetPos)
-    if CamLockSettings.Mode == "Cam" then
-        cam.CFrame = desired
+    local alpha = math.clamp(1 - (CamLockSettings.Smoothing ^ (dt * 60)), 0, 1)
+    if CamLockSettings.Mode == "Mouse" then
+        -- Mouse mode: nudge the MOUSE toward the target's on-screen position.
+        -- It doesn't rotate the camera, so it also works in third person.
+        if _mouseMoveRel then
+            local sp, onScreen = cam:WorldToViewportPoint(targetPos)
+            if onScreen then
+                local mp = UserInputService:GetMouseLocation()
+                pcall(_mouseMoveRel, (sp.X - mp.X) * alpha, (sp.Y - mp.Y) * alpha)
+            end
+        end
     else
-        local alpha = math.clamp(1 - (CamLockSettings.Smoothing ^ (dt * 60)), 0, 1)
+        -- Camera mode: steer the camera toward the target (smoothed)
+        local desired = CFrame.new(cam.CFrame.Position, targetPos)
         cam.CFrame = cam.CFrame:Lerp(desired, alpha)
     end
 end)

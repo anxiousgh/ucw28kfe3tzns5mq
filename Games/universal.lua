@@ -34,8 +34,10 @@ regToggle(Aim, "CamOnlyVisible", "Only while visible", cs.OnlyVisible or false, 
 
 regDropdown(Aim, "CamHitPart", "Hit part", cs.TargetPart or "Head",
     { "Head", "HumanoidRootPart", "UpperTorso", "Random" }, false, function(v) cam.setHitPart(v) end)
+-- Mouse = move the mouse toward the target (works in 3rd person, needs an
+-- executor with mousemoverel); Camera = steer the camera toward the target
 regDropdown(Aim, "CamMode", "Mode", cs.Mode or "Mouse",
-    { "Mouse", "Cam" }, false, function(v) cam.setMode(v) end)
+    { "Mouse", "Camera" }, false, function(v) cam.setMode(v) end)
 
 regSlider(Aim, "CamFov", "FOV radius", "", { min = 1, max = 2000, default = cs.FOVRadius or 200 },
     function(v) cam.setFov(v) end)
