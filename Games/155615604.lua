@@ -20,6 +20,20 @@ if not pl then
     return
 end
 
+-- named hit sounds (label -> asset id)
+local PL_SOUNDS = {
+    { "deep bell",                 104441273771318 },
+    { "crit",                      135698842254153 },
+    { "m4a1",                      18521643711 },
+    { "pack a punch",              7408420244 },
+    { "random sound",              133749572213659 },
+    { "weird idk what its called", 129157734600366 },
+    { "csgo headshot",             133002449941130 },
+    { "rust headshot",             121566025787365 },
+}
+local soundLabels, idByLabel = {}, {}
+for _, s in ipairs(PL_SOUNDS) do soundLabels[#soundLabels + 1] = s[1]; idByLabel[s[1]] = s[2] end
+
 -- ============================================================
 --  AIMBOT  (kill aura + hit feedback + tracers)
 -- ============================================================
@@ -44,9 +58,15 @@ Aim:NewSection("Hit feedback")
 regToggle(Aim, "PL_HitMarker", "Hit marker", false, function(v) pl.hitMarker.setMarker(v) end)
 regToggle(Aim, "PL_HitNumber", "Hit number", false, function(v) pl.hitMarker.setNumber(v) end)
 regToggle(Aim, "PL_HitSound",  "Hit sound",  false, function(v) pl.hitSound.setEnabled(v) end)
+regDropdown(Aim, "PL_HitSoundId", "Sound", "crit", soundLabels, false, function(label)
+    local id = idByLabel[label]; if id then pl.hitSound.setId(id) end
+end)
+regSlider(Aim, "PL_HitSoundVol", "Sound volume", "", { min = 0, max = 5, default = 1 }, function(v) pl.hitSound.setVolume(v) end)
 
 Aim:NewSection("Tracer")
 regToggle(Aim, "PL_Tracer",      "Bullet tracer", false, function(v) pl.tracer.setEnabled(v) end)
+regDropdown(Aim, "PL_TracerStyle", "Tracer style", "Standard",
+    { "Standard", "Laser", "Thin", "Lightning", "Plasma" }, false, function(v) pl.tracer.setStyle(v) end)
 regToggle(Aim, "PL_TracerTrail", "Tracer trail",  false, function(v) pl.tracer.setTrail(v) end)
 -- lifetime 0.05-3.00s shown as 5-300; thickness 0.01-2.00 shown as 1-200
 regSlider(Aim, "PL_TracerLifetime", "Tracer lifetime", "", { min = 5, max = 300, default = 20 }, function(v)
