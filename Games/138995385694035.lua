@@ -28,8 +28,18 @@ local RunService   = game:GetService("RunService")
 local LocalPlayer  = Players.LocalPlayer
 
 -- ---------- shared targeting helpers ----------
-local function camPos() return workspace.CurrentCamera.CFrame.Position end
 local function myRoot() return hook.utils.getRoot() end
+-- line-of-sight origin = our HEAD (not the camera; in 3rd person the camera
+-- can see over/around walls the character is actually behind, which made
+-- "visible" shots go through walls).
+local function headPos()
+    local c = LocalPlayer.Character
+    local h = c and c:FindFirstChild("Head")
+    if h then return h.Position end
+    local r = myRoot()
+    if r then return r.Position end
+    return workspace.CurrentCamera.CFrame.Position
+end
 
 local function aliveParts(p)
     local ch = p.Character; if not ch then return nil, nil end
@@ -59,7 +69,7 @@ local function nearestEnemy(range, needVisible, exclude)
             if hrp then
                 local d = (hrp.Position - origin).Magnitude
                 if d <= (range or math.huge) and (not best or d < bestD) then
-                    if (not needVisible) or isVisible(camPos(), hrp, ch) then
+                    if (not needVisible) or isVisible(headPos(), hrp, ch) then
                         best, bestD = p, d
                     end
                 end
@@ -159,7 +169,7 @@ task.spawn(function()
                     if p ~= LocalPlayer and not excl[p] then
                         local hrp, ch = aliveParts(p)
                         if hrp and (hrp.Position - root.Position).Magnitude <= killAuraRange
-                            and isVisible(camPos(), hrp, ch) then
+                            and isVisible(headPos(), hrp, ch) then
                             rb.addTarget(p)
                         end
                     end
@@ -182,7 +192,7 @@ regToggle(Combat, "HC_ForceHit", "Force Hit (needs Auto Shoot)", false, function
     if v then hc.forceHit.start() else hc.forceHit.stop() end
 end)
 regDropdown(Combat, "HC_ForceHitPart", "Hit part", "Head", { "Head", "UpperTorso", "HumanoidRootPart" }, false, function(v) hc.forceHit.setHitPart(v) end)
-regDecimal(Combat, "HC_ForceHitCooldown", "Cooldown", "s", 0, 2, 0.2, 100, function(v) hc.forceHit.setCooldown(v) end)
+regSlider(Combat, "HC_ForceHitCooldown", "Cooldown", " ms", { min = 0, max = 1000, default = 200 }, function(v) hc.forceHit.setCooldown(v / 1000) end)
 
 Combat:NewSection("Fake tracer")
 regToggle(Combat, "HC_FHTracer", "Show fake bullet tracer", true, function(v) hc.forceHit.setTracerEnabled(v) end)
