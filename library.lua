@@ -219,24 +219,30 @@ local function _approxColor(a, b)
     return math.abs(a.R - b.R) < 0.012 and math.abs(a.G - b.G) < 0.012 and math.abs(a.B - b.B) < 0.012
 end
 
+-- type-checked property swap (no pcall -> no per-instance overhead/freeze)
+local function _swap(inst, prop, fromA, toA, fromB, toB)
+    local val = inst[prop]
+    if _approxColor(val, fromA) then inst[prop] = toA
+    elseif _approxColor(val, fromB) then inst[prop] = toB end
+end
+
 local function _recolor(inst, fromA, toA, fromB, toB)
-    for _, prop in ipairs({ "BackgroundColor3", "TextColor3", "ImageColor3", "ScrollBarImageColor3", "BorderColor3", "PlaceholderColor3" }) do
-        local ok, val = pcall(function() return inst[prop] end)
-        if ok and typeof(val) == "Color3" then
-            if _approxColor(val, fromA) then
-                inst[prop] = toA
-            elseif _approxColor(val, fromB) then
-                inst[prop] = toB
-            end
+    if inst:IsA("GuiObject") then
+        _swap(inst, "BackgroundColor3", fromA, toA, fromB, toB)
+        _swap(inst, "BorderColor3", fromA, toA, fromB, toB)
+        if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+            _swap(inst, "TextColor3", fromA, toA, fromB, toB)
         end
-    end
-    if inst:IsA("UIGradient") then
+        if inst:IsA("TextBox") then _swap(inst, "PlaceholderColor3", fromA, toA, fromB, toB) end
+        if inst:IsA("ImageLabel") or inst:IsA("ImageButton") then _swap(inst, "ImageColor3", fromA, toA, fromB, toB) end
+        if inst:IsA("ScrollingFrame") then _swap(inst, "ScrollBarImageColor3", fromA, toA, fromB, toB) end
+    elseif inst:IsA("UIGradient") then
         local changed, newKp = false, {}
         for _, k in ipairs(inst.Color.Keypoints) do
             local c = k.Value
             if _approxColor(c, fromA) then c = toA; changed = true
             elseif _approxColor(c, fromB) then c = toB; changed = true end
-            table.insert(newKp, ColorSequenceKeypoint.new(k.Time, c))
+            newKp[#newKp + 1] = ColorSequenceKeypoint.new(k.Time, c)
         end
         if changed then inst.Color = ColorSequence.new(newKp) end
     end
@@ -273,7 +279,7 @@ function library:SetFont(font)
         if gui then
             for _, d in ipairs(gui:GetDescendants()) do
                 if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
-                    pcall(function() d.Font = font end)
+                    d.Font = font
                 end
             end
         end
@@ -292,6 +298,26 @@ function library:SetScale(scale)
     uiscale.Scale = scale
     uiscale.Parent = edge
     library.currentScale = scale
+end
+
+-- Background opacity of the main window (0 = solid, 1 = fully see-through).
+function library:SetBackgroundTransparency(t)
+    t = math.clamp(tonumber(t) or 0, 0, 1)
+    local screen = CoreGuiService:FindFirstChild("screen")
+    local edge = screen and screen:FindFirstChild("edge")
+    local bg = edge and edge:FindFirstChild("background")
+    if bg then bg.BackgroundTransparency = t end
+    library.bgTransparency = t
+end
+
+function library:SetWatermarkVisible(v)
+    local wm = CoreGuiService:FindFirstChild("watermark")
+    if wm then wm.Enabled = v ~= false end
+end
+
+function library:SetKeybindListVisible(v)
+    local kb = CoreGuiService:FindFirstChild("keybinds")
+    if kb then kb.Enabled = v ~= false end
 end
 
 -- On-screen keybind list, styled like the menu. Sits left-middle and

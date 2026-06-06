@@ -430,6 +430,11 @@ regToggle(Misc, "PromptRange",   "Unlimited range",   false, function(v) if v th
 regToggle(Misc, "PromptWalls",   "Through walls",     false, function(v) if v then hook.prompts.throughWalls.start()    else hook.prompts.throughWalls.stop()    end end)
 regToggle(Misc, "PromptAutoFire","Auto-fire",         false, function(v) if v then hook.prompts.autoFire.start()        else hook.prompts.autoFire.stop()        end end)
 
+Misc:NewSection("Respawn")
+-- resets your character but respawns at where you triggered it (decay F.respawn)
+Misc:NewButton("Respawn", function() hook.respawn.fire() end)
+Misc:NewKeybind("Respawn key", Enum.KeyCode.T, function() hook.respawn.fire() end)
+
 -- ============================================================
 --  SETTINGS  (universal GUI prefs, autosaved, NOT part of configs)
 -- ============================================================
@@ -454,8 +459,14 @@ Settings:NewDropdown("Font", settings.font or "Code", fontNames, false, function
     library:SetFont(v); settings.font = v; saveSettings()
 end)
 
-Settings:NewSlider("UI scale", "%", false, "/", { min = 50, max = 150, default = settings.scale or 100 }, function(v)
-    library:SetScale(v / 100); settings.scale = v; saveSettings()
+Settings:NewSlider("Background transparency", "%", false, "/", { min = 0, max = 100, default = math.floor((settings.bgTransparency or 0) * 100) }, function(v)
+    library:SetBackgroundTransparency(v / 100); settings.bgTransparency = v / 100; saveSettings()
+end)
+Settings:NewToggle("Watermark", settings.watermark ~= false, function(v)
+    library:SetWatermarkVisible(v); settings.watermark = v; saveSettings()
+end)
+Settings:NewToggle("Keybind list", settings.keybinds ~= false, function(v)
+    library:SetKeybindListVisible(v); settings.keybinds = v; saveSettings()
 end)
 
 Settings:NewSection("Menu")
@@ -555,7 +566,9 @@ end)
 -- ============================================================
 library:SetAccent(library.themes[settings.theme or "Witherhook"] or library.themes.Witherhook)
 library:SetFont(settings.font or "Code")
-library:SetScale((settings.scale or 100) / 100)
+library:SetBackgroundTransparency(settings.bgTransparency or 0)
+library:SetWatermarkVisible(settings.watermark ~= false)
+library:SetKeybindListVisible(settings.keybinds ~= false)
 
 task.defer(function()
     local n = getAuto()

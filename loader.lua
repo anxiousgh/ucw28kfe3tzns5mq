@@ -17,12 +17,14 @@ local BRANCH = "main"
 -- strings, so pin the URL to the latest commit SHA: a unique path the
 -- cache can't stale. Falls back to the branch if the API call fails.
 local BASE
+local pinned = false   -- true => fetched from the exact latest commit (definitely up to date)
 do
     local okSha, body = pcall(game.HttpGet, game,
         ("https://api.github.com/repos/%s/%s/commits/%s"):format(OWNER, REPO, BRANCH))
     local sha = okSha and type(body) == "string" and body:match('"sha"%s*:%s*"(%x+)"')
     if sha then
         BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO, sha)
+        pinned = true
         print("[witherhook] pinned to commit " .. sha:sub(1, 12))
     else
         BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO, BRANCH)
@@ -46,12 +48,29 @@ end
 -- ---------- load the UI library ----------
 local library = load("library.lua")()
 
+-- ---------- version + current game ----------
+local whVersion = "?"
+do
+    local okV, vbody = pcall(fetch, "version.txt")
+    if okV and type(vbody) == "string" then
+        local v = vbody:gsub("%s+", "")
+        if #v > 0 then whVersion = v end
+    end
+end
+
+local placeId  = tostring(library:GetPlaceId())
+local gameName = "Game " .. placeId
+pcall(function()
+    local info = game:GetService("MarketplaceService"):GetProductInfo(tonumber(placeId))
+    if info and info.Name then gameName = info.Name end
+end)
+
 -- ---------- branding ----------
 library.rank  = "user"
 library.title = "witherhook"
 
 -- ---------- watermark ----------
-local Wm    = library:Watermark("witherhook | v" .. library.version .. " | " .. library:GetUsername())
+local Wm    = library:Watermark("witherhook v" .. whVersion .. " | " .. gameName .. " | " .. library:GetUsername())
 local FpsWm = Wm:AddWatermark("fps: " .. library.fps)
 coroutine.wrap(function()
     while wait(0.75) do
@@ -70,16 +89,18 @@ local Window = library:Init()
 -- ---------- game dispatch ----------
 -- Try to load a module named after the current PlaceId; fall back to
 -- the universal shell if there's no game-specific module.
-local gameKey = tostring(library:GetPlaceId())
+local gameKey = placeId
 
 local ctx = {
-    library = library,
-    window  = Window,
-    notif   = Notif,
-    fetch   = fetch,
-    load    = load,
-    base    = BASE,
-    gameKey = gameKey,
+    library  = library,
+    window   = Window,
+    notif    = Notif,
+    fetch    = fetch,
+    load     = load,
+    base     = BASE,
+    gameKey  = gameKey,
+    version  = whVersion,
+    gameName = gameName,
 }
 
 -- A fetched body counts as "missing" if it's empty or GitHub's 404 text.
@@ -125,4 +146,9 @@ if not tryGameModule(gameKey) then
     end
 end
 
-Notif:Notify("witherhook loaded", 4, "success")
+-- update status: SHA-pin succeeded => running the exact latest commit
+if pinned then
+    Notif:Notify("witherhook v" .. whVersion .. " loaded (up to date)", 4, "success")
+else
+    Notif:Notify("witherhook v" .. whVersion .. " loaded - couldn't verify latest (cached?)", 6, "alert")
+end
