@@ -4228,6 +4228,21 @@ F.forceChat = (function()
         end
     end
 
+    local function disableOnce()
+        pcall(function()
+            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
+        end)
+        if TextChatService then
+            for _, c in ipairs(TextChatService:GetDescendants()) do
+                if c:IsA("ChatWindowConfiguration")
+                or c:IsA("ChatInputBarConfiguration")
+                or c:IsA("BubbleChatConfiguration") then
+                    pcall(function() c.Enabled = false end)
+                end
+            end
+        end
+    end
+
     local function start()
         G.forceChatActive = true
         -- spawn a polling loop that re-applies every 2s. simpler than
@@ -4242,7 +4257,9 @@ F.forceChat = (function()
     end
 
     local function stop()
+        -- flip the flag first so the re-apply loop exits, then turn chat back off
         G.forceChatActive = false
+        disableOnce()
     end
 
     return makeToggle(start, stop, "forceChatActive")
