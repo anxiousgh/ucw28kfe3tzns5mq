@@ -78,6 +78,7 @@ local library = {
     rank = "private",
     accentColor = Color3.fromRGB(232, 158, 255),
     accentDark  = Color3.fromRGB(128, 94, 208),
+    keybinds    = {},   -- { {name=, getKey=fn, isOn=fn}, ... } populated by Toggle:AddKeybind
 }
 
 coroutine.wrap(function()
@@ -196,7 +197,7 @@ function library:Remove()
     library.Unloaded = true
     for _, v in pairs(CoreGuiService:GetChildren()) do
         local n = v.Name
-        if n == "screen" or n == "watermark" or n == "Notifications" or n == "introduction" then
+        if n == "screen" or n == "watermark" or n == "Notifications" or n == "introduction" or n == "keybinds" then
             pcall(function() v:Destroy() end)
         end
     end
@@ -250,7 +251,7 @@ function library:SetAccent(color)
     local hh, ss, vv = Color3.toHSV(color)
     local toA = color
     local toB = Color3.fromHSV(hh, ss, vv * 0.806)
-    for _, name in ipairs({ "screen", "watermark", "Notifications" }) do
+    for _, name in ipairs({ "screen", "watermark", "Notifications", "keybinds" }) do
         local gui = CoreGuiService:FindFirstChild(name)
         if gui then
             _recolor(gui, fromA, toA, fromB, toB)
@@ -267,7 +268,7 @@ function library:SetFont(font)
     if typeof(font) ~= "EnumItem" then
         font = Enum.Font[tostring(font)] or Enum.Font.Code
     end
-    for _, name in ipairs({ "screen", "watermark", "Notifications" }) do
+    for _, name in ipairs({ "screen", "watermark", "Notifications", "keybinds" }) do
         local gui = CoreGuiService:FindFirstChild(name)
         if gui then
             for _, d in ipairs(gui:GetDescendants()) do
@@ -291,6 +292,113 @@ function library:SetScale(scale)
     uiscale.Scale = scale
     uiscale.Parent = edge
     library.currentScale = scale
+end
+
+-- On-screen keybind list, styled like the menu. Sits left-middle and
+-- shows "[KEY] Name" for every Toggle that has a keybind, lighting up
+-- (accent) the ones currently toggled on. Reads library.keybinds live.
+function library:CreateKeybindList(titleText)
+    titleText = titleText or "keybinds"
+    local existing = CoreGuiService:FindFirstChild("keybinds")
+    if existing then existing:Destroy() end
+
+    local screen = Instance.new("ScreenGui")
+    screen.Name = "keybinds"
+    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    pcall(function() screen.ResetOnSpawn = false end)
+    screen.Parent = CoreGuiService
+
+    local edge = Instance.new("Frame")
+    edge.Name = "edge"
+    edge.AnchorPoint = Vector2.new(0, 0.5)
+    edge.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    edge.Position = UDim2.new(0, 12, 0.5, 0)
+    edge.Size = UDim2.new(0, 184, 0, 48)
+    edge.Parent = screen
+    local ec = Instance.new("UICorner"); ec.CornerRadius = UDim.new(0, 2); ec.Parent = edge
+
+    local bg = Instance.new("Frame")
+    bg.Name = "background"
+    bg.AnchorPoint = Vector2.new(0.5, 0.5)
+    bg.Position = UDim2.new(0.5, 0, 0.5, 0)
+    bg.Size = UDim2.new(1, -2, 1, -2)
+    bg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    bg.ClipsDescendants = true
+    bg.Parent = edge
+    local bgc = Instance.new("UICorner"); bgc.CornerRadius = UDim.new(0, 2); bgc.Parent = bg
+    local grad = Instance.new("UIGradient")
+    grad.Color = ColorSequence.new{ ColorSequenceKeypoint.new(0, Color3.fromRGB(34, 34, 34)), ColorSequenceKeypoint.new(1, Color3.fromRGB(28, 28, 28)) }
+    grad.Rotation = 90
+    grad.Parent = bg
+
+    local bar = Instance.new("Frame")
+    bar.Name = "bar"
+    bar.BackgroundColor3 = library.accentColor
+    bar.BorderSizePixel = 0
+    bar.Size = UDim2.new(1, 0, 0, 1)
+    bar.Parent = bg
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.new(0, 8, 0, 0)
+    title.Size = UDim2.new(1, -10, 0, 22)
+    title.Font = Enum.Font.Code
+    title.Text = titleText
+    title.TextColor3 = Color3.fromRGB(198, 198, 198)
+    title.TextSize = 14
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = bg
+
+    local listFrame = Instance.new("Frame")
+    listFrame.BackgroundTransparency = 1
+    listFrame.Position = UDim2.new(0, 8, 0, 22)
+    listFrame.Size = UDim2.new(1, -10, 1, -26)
+    listFrame.Parent = bg
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 2)
+    layout.Parent = listFrame
+
+    local entries = {}
+    local function rebuild(n)
+        for _, e in ipairs(entries) do e:Destroy() end
+        entries = {}
+        for i = 1, n do
+            local lbl = Instance.new("TextLabel")
+            lbl.BackgroundTransparency = 1
+            lbl.Size = UDim2.new(1, 0, 0, 16)
+            lbl.Font = Enum.Font.Code
+            lbl.TextColor3 = Color3.fromRGB(160, 160, 160)
+            lbl.TextSize = 13
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.LayoutOrder = i
+            lbl.Parent = listFrame
+            entries[i] = lbl
+        end
+    end
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if library.Unloaded then conn:Disconnect(); return end
+        local kb = library.keybinds or {}
+        local n = #kb
+        if n == 0 then edge.Visible = false; return end
+        edge.Visible = true
+        if #entries ~= n then rebuild(n) end
+        for i = 1, n do
+            local data, lbl = kb[i], entries[i]
+            if data and lbl then
+                local okk, key = pcall(data.getKey)
+                local oko, on  = pcall(data.isOn)
+                lbl.Text = string.format("[%s] %s", okk and tostring(key) or "?", tostring(data.name))
+                lbl.TextColor3 = (oko and on) and library.accentColor or Color3.fromRGB(160, 160, 160)
+            end
+        end
+        bar.BackgroundColor3 = library.accentColor
+        edge.Size = UDim2.new(0, 184, 0, 22 + n * 18 + 8)
+    end)
+
+    return screen
 end
 
 function library:Watermark(text)
@@ -1988,6 +2096,14 @@ function library:Init(key)
                     keybindFrame.Visible = true
                     return ExtraKeybindFunctions
                 end
+                -- register for the on-screen keybind list (live key + state)
+                if not library.keybinds then library.keybinds = {} end
+                table.insert(library.keybinds, {
+                    name   = text,
+                    getKey = function() return ChosenKey end,
+                    isOn   = function() return On end,
+                })
+
                 return ExtraKeybindFunctions and ToggleFunctions
             end
 

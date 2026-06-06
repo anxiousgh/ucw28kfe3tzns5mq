@@ -148,19 +148,23 @@ local Movement = Window:NewTab("Movement")
 
 Movement:NewSection("Movement")
 regToggle(Movement, "Fly", "Fly", false, function(v) if v then hook.fly.start() else hook.fly.stop() end end)
+    :AddKeybind(Enum.KeyCode.Z)
 regSlider(Movement, "FlySpeed", "Fly speed", "", { min = 5, max = 3000, default = hook.fly.getSpeed() or 60 },
     function(v) hook.fly.setSpeed(v) end)
 
 regToggle(Movement, "Walkspeed", "Walkspeed", false, function(v) if v then hook.walkspeed.start() else hook.walkspeed.stop() end end)
+    :AddKeybind(Enum.KeyCode.X)
 regSlider(Movement, "WalkspeedValue", "Walkspeed value", "", { min = 8, max = 1000, default = hook.walkspeed.getValue() or 50 },
     function(v) hook.walkspeed.setValue(v) end)
 
 regToggle(Movement, "JumpPower", "Jump power", false, function(v) if v then hook.jumpPower.start() else hook.jumpPower.stop() end end)
+    :AddKeybind(Enum.KeyCode.V)
 regSlider(Movement, "JumpPowerValue", "Jump power value", "", { min = 0, max = 2000, default = hook.jumpPower.getValue() or 50 },
     function(v) hook.jumpPower.setValue(v) end)
 
 regToggle(Movement, "CFrameSpeed", "CFrame speed", false,
     function(v) if v then hook.cframeSpeed.start(hook.cframeSpeed.getMultiplier()) else hook.cframeSpeed.stop() end end)
+    :AddKeybind(Enum.KeyCode.B)
 regSlider(Movement, "CFrameMult", "CFrame speed multiplier", "x", { min = 1, max = 100, default = hook.cframeSpeed.getMultiplier() or 2 },
     function(v) hook.cframeSpeed.setMultiplier(v) end)
 
@@ -224,6 +228,7 @@ desyncEnableT = regToggle(Movement, "DesyncEnabled", "Enable desync", false, fun
         hook.desync.stop()
     end
 end)
+desyncEnableT:AddKeybind(Enum.KeyCode.G)
 regSlider(Movement, "DesyncMin", "Void min distance", "", { min = 500, max = 100000, default = 5000 },
     function(v) desyncMin = v; hook.desync.setRange(desyncMin, desyncMax) end)
 regSlider(Movement, "DesyncMax", "Void max distance", "", { min = 500, max = 100000, default = 20000 },
@@ -380,5 +385,8 @@ task.defer(function()
     local n = getAuto()
     if n and n ~= false then loadConfig(CFG_DIR, n) end
 end)
+
+-- on-screen keybind list (left-middle); auto-includes universal tab keybinds
+library:CreateKeybindList("witherhook")
 
 notify("witherhook ready", 3, "success")
