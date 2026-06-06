@@ -1725,8 +1725,6 @@ local function clFindTarget()
     return closest
 end
 
-local clScanAccum = 0
-local clCachedPart = nil
 RunService.RenderStepped:Connect(function(dt)
     -- Fast early-out: skip the entire camlock per-frame when nothing
     -- in the module wants work (both Enabled and ShowFOV are off).
@@ -1734,7 +1732,6 @@ RunService.RenderStepped:Connect(function(dt)
     -- feature is idle.
     if not CamLockSettings.Enabled and not CamLockSettings.ShowFOV then
         if clStickyTarget then clStickyTarget = nil end
-        if clCachedPart then clCachedPart = nil end
         if CL_fovCircle and CL_fovCircle.Visible then CL_fovCircle.Visible = false end
         return
     end
@@ -1746,18 +1743,9 @@ RunService.RenderStepped:Connect(function(dt)
             CL_fovCircle.Position = mp
         end
     end
-    if not CamLockSettings.Enabled then clStickyTarget = nil; clCachedPart = nil; return end
+    if not CamLockSettings.Enabled then clStickyTarget = nil; return end
     if G.freecamActive then return end
-    -- Throttle the expensive target scan (player loop + WorldToViewportPoint
-    -- + visibility raycasts) to ~120 Hz so it doesn't run hundreds of times a
-    -- second at high fps. The camera still steers every frame for smoothness.
-    clScanAccum = clScanAccum + dt
-    if clScanAccum >= (1 / 120) or not clCachedPart then
-        clScanAccum = 0
-        clCachedPart = clFindTarget()
-    end
-    local part = clCachedPart
-    if not part or not part.Parent then return end
+    local part = clFindTarget(); if not part then return end
     local targetPos = CamLockSettings.Prediction
         and (part.Position + (part.AssemblyLinearVelocity * CamLockSettings.PredictionAmount))
         or part.Position
