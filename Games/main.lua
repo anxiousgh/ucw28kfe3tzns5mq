@@ -92,9 +92,26 @@ end
 local flags    = {}   -- key -> current value
 local controls = {}   -- key -> { set = fn(value) }
 
+-- Everything currently switched ON, with the function that turns it back
+-- off. A module is added when its toggle goes on and removed when it goes
+-- off, so on unload we can stop every still-active module cleanly.
+local activeStoppers = {}   -- key -> fn() that stops that module
+
+local function stopAllActive()
+    local fns = {}
+    for _, fn in pairs(activeStoppers) do fns[#fns + 1] = fn end
+    for _, fn in ipairs(fns) do pcall(fn) end   -- snapshot first: each call mutates activeStoppers
+    activeStoppers = {}
+end
+
 local function regToggle(tab, key, text, default, cb)
     flags[key] = default
-    local h = tab:NewToggle(text, default, function(v) flags[key] = v; if cb then cb(v) end end)
+    local h = tab:NewToggle(text, default, function(v)
+        flags[key] = v
+        if v then activeStoppers[key] = function() h:Set(false) end
+        else activeStoppers[key] = nil end
+        if cb then cb(v) end
+    end)
     controls[key] = { set = function(v) h:Set(v and true or false) end }
     return h
 end
@@ -252,6 +269,7 @@ end)
 
 Settings:NewSection("Menu")
 Settings:NewButton("Unload witherhook", function()
+    stopAllActive()      -- stop every still-active module first
     library:Remove()
 end)
 
