@@ -131,6 +131,16 @@ local function regDropdown(tab, key, text, default, list, multi, cb)
     return h
 end
 
+-- Expose backend + registry helpers so universal / per-game modules can add
+-- tabs that integrate with configs, autoload and unload (active-tracking).
+ctx.api = {
+    hook        = hook,
+    notify      = notify,
+    regToggle   = regToggle,
+    regSlider   = regSlider,
+    regDropdown = regDropdown,
+}
+
 -- ============================================================
 --  MOVEMENT
 -- ============================================================
