@@ -13,6 +13,7 @@ local Window = ctx.window
 local hook   = api.hook
 local notify = api.notify
 local regToggle, regSlider, regDropdown = api.regToggle, api.regSlider, api.regDropdown
+local regColor = api.regColor
 
 local cam  = hook.camLock
 local trig = hook.triggerbot
@@ -22,13 +23,15 @@ local ts   = trig.settings
 -- ============================================================
 --  AIMLOCK  (camera lock)
 -- ============================================================
-local Aim = Window:NewTab("Aimlock")
-
--- ---------- Target lock (shared by camlock + triggerbot) ----------
--- One key locks onto the single target under your crosshair; press again to
--- unlock. While locked, BOTH camlock and triggerbot focus only on that target.
-Aim:NewSection("Target lock")
-Aim:NewKeybind("Lock / unlock target", Enum.KeyCode.E, function()
+-- ============================================================
+--  TARGET  (single-target lock; drives camlock + triggerbot)
+-- ============================================================
+-- One key locks the single target your crosshair is on; press again to
+-- unlock. Camlock steers ONLY to the locked target, and the triggerbot fires
+-- ONLY while you're hovering it.
+local Target = Window:NewTab("Target")
+Target:NewSection("Target lock")
+Target:NewKeybind("Lock / unlock target", Enum.KeyCode.E, function()
     local wasLocked = cam.getLocked() ~= nil
     local locked, plr = cam.lockToggle()
     if locked and plr then
@@ -36,17 +39,31 @@ Aim:NewKeybind("Lock / unlock target", Enum.KeyCode.E, function()
     elseif wasLocked then
         notify("Target unlocked", 2, "information")
     else
-        notify("No target under your crosshair", 2, "alert")
+        notify("No valid target found", 2, "alert")
     end
 end)
-Aim:NewLabel("While a target is locked, camlock + triggerbot use only that target.", "left")
+-- how the lock picks who: nearest to crosshair / screen center / you
+regDropdown(Target, "LockPriority", "Lock priority", "Mouse",
+    { "Mouse", "Camera", "Distance" }, false, function(v) cam.setLockMode(v) end)
+Target:NewLabel("Camlock + triggerbot only act on the locked target.", "left")
 
+Target:NewSection("Visualization")
+regToggle(Target, "LockHighlight", "Highlight target", false, function(v) cam.setLockHighlight(v) end)
+regColor(Target, "LockHighlightColor", "Highlight color", Color3.fromRGB(0, 200, 255),
+    function(c) cam.setLockHighlightColor(c) end)
+regToggle(Target, "LockLine", "Target line", false, function(v) cam.setLockLine(v) end)
+regColor(Target, "LockLineColor", "Line color", Color3.fromRGB(0, 200, 255),
+    function(c) cam.setLockLineColor(c) end)
+
+-- ============================================================
+--  AIMLOCK  (camera lock)
+-- ============================================================
+local Aim = Window:NewTab("Aimlock")
 Aim:NewSection("Camera lock")
 
 regToggle(Aim, "CamEnabled", "Enabled", cs.Enabled or false, function(v) cam.setEnabled(v) end)
     :AddKeybind(Enum.KeyCode.C, "Camera Lock Toggle")
 regToggle(Aim, "CamTeamCheck",   "Team check",        cs.TeamCheck or false,   function(v) cam.setTeamCheck(v) end)
-regToggle(Aim, "CamSticky",      "Sticky target",     cs.Sticky or false,      function(v) cam.setSticky(v) end)
 regToggle(Aim, "CamClosestPart", "Closest bodypart",  cs.ClosestPart or false, function(v) cam.setClosestPart(v) end)
 regToggle(Aim, "CamToolCheck",   "Tool check",        cs.ToolCheck or false,   function(v) cam.setToolCheck(v) end)
 regToggle(Aim, "CamOnlyVisible", "Only while visible", cs.OnlyVisible or false, function(v) cam.setOnlyVisible(v) end)

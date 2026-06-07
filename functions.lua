@@ -1150,8 +1150,8 @@ end)
 local function saDirection(origin, targetPos) return (targetPos - origin).Unit * 1000 end
 
 -- forward-declared so F.camLock (defined later, outside the scope block) can
--- reach the manual target-lock that lives inside the do-block
-local _clLockToggle, _clGetLocked
+-- reach the manual target-lock + its customization that live inside the block
+local _lockApi
 
 do  -- scope camlock + triggerbot locals so they don't count toward the
     -- top-level 200-local (register) limit. The RenderStepped/Heartbeat
@@ -1242,75 +1242,120 @@ local function clGetPartForPlayer(char, hrp)
     end
 end
 
+-- Camlock target is ONLY the manually-locked player (no auto-nearest). Holds
+-- it while alive regardless of FOV; auto-unlocks on death/leave.
 local function clFindTarget()
-    local cam = workspace.CurrentCamera
-    local mousePos = UserInputService:GetMouseLocation()
-    -- Manual lock overrides everything: hold the locked player while alive,
-    -- regardless of FOV. Auto-unlocks when they die or leave.
-    if _lockedPlayer then
-        local char = _lockedPlayer.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-        if hum and hrp and hum.Health > 0 then
-            return clGetPartForPlayer(char, hrp)
-        end
-        _lockedPlayer = nil
+    if not _lockedPlayer then return nil end
+    local char = _lockedPlayer.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if hum and hrp and hum.Health > 0 then
+        return clGetPartForPlayer(char, hrp)
     end
-    -- Sticky: once a target is acquired, HOLD it as long as they're alive,
-    -- even if they leave the FOV. (FOV only gates ACQUIRING a new target in
-    -- the scan below.) Drop it only when they die / leave.
-    if CamLockSettings.Sticky and clStickyTarget then
-        local sPlr = plrs:GetPlayerFromCharacter(clStickyTarget.Parent)
-        if sPlr and clIsAlive(sPlr) then
-            local char = sPlr.Character
-            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                clStickyTarget = clGetPartForPlayer(char, hrp)
-                return clStickyTarget
-            end
-        end
-        clStickyTarget = nil
-    end
-    local closest, closestDist = nil, CamLockSettings.FOVRadius + 1
-    for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
-        local ok, char, hrp = clIsValidTarget(plr); if not ok then continue end
-        local checkPart = char:FindFirstChild(CamLockSettings.TargetPart) or hrp
-        local sp, onScreen = cam:WorldToViewportPoint(checkPart.Position)
-        if not onScreen then continue end
-        local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
-        if d < closestDist then closestDist = d; closest = clGetPartForPlayer(char, hrp) end
-    end
-    clStickyTarget = closest
-    return closest
+    _lockedPlayer = nil
+    return nil
 end
 
--- Manual single-target lock: one key toggles it. Locks the valid target
--- closest to the mouse (respects team/visible checks); press again to unlock.
--- Shared by camlock (clFindTarget override above) and triggerbot.
-local function clBestNearMouse()
+-- ---- manual single-target lock + its customization ----
+local _lockMode      = "Mouse"  -- how the lock picks: "Mouse"|"Camera"|"Distance"
+local _lockHLOn      = false
+local _lockHLColor   = Color3.fromRGB(0, 200, 255)
+local _lockHL                   -- Highlight instance
+local _lockLineOn    = false
+local _lockLineColor = Color3.fromRGB(0, 200, 255)
+local _lockLine                 -- Drawing line
+if Drawing and Drawing.new then
+    _lockLine = Drawing.new("Line")
+    _lockLine.Thickness = 1; _lockLine.Visible = false; _lockLine.Color = _lockLineColor
+end
+
+-- pick the best valid target by the chosen priority (respects team/visible)
+local function clPickTarget()
     local cam = workspace.CurrentCamera
-    local mousePos = UserInputService:GetMouseLocation()
-    local best, bestDist = nil, math.huge
+    if _lockMode == "Distance" then
+        local lc = lplr.Character
+        local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+        local origin = lhrp and lhrp.Position
+        if not origin then return nil end
+        local best, bestD = nil, math.huge
+        for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
+            local ok, _, hrp = clIsValidTarget(plr); if not ok then continue end
+            local d = (hrp.Position - origin).Magnitude
+            if d < bestD then bestD = d; best = plr end
+        end
+        return best
+    end
+    local refPt
+    if _lockMode == "Camera" then
+        local vp = cam.ViewportSize; refPt = Vector2.new(vp.X / 2, vp.Y / 2)
+    else
+        refPt = UserInputService:GetMouseLocation()
+    end
+    local best, bestD = nil, math.huge
     for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
         local ok, char, hrp = clIsValidTarget(plr); if not ok then continue end
         local part = char:FindFirstChild(CamLockSettings.TargetPart) or hrp
         local sp, onScreen = cam:WorldToViewportPoint(part.Position)
         if onScreen then
-            local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
-            if d < bestDist then bestDist = d; best = plr end
+            local d = (refPt - Vector2.new(sp.X, sp.Y)).Magnitude
+            if d < bestD then bestD = d; best = plr end
         end
     end
     return best
 end
+
 local function clLockToggle()
     if _lockedPlayer then _lockedPlayer = nil; return false, nil end
-    local p = clBestNearMouse()
-    if p then _lockedPlayer = p end
+    _lockedPlayer = clPickTarget()
     return _lockedPlayer ~= nil, _lockedPlayer
 end
--- publish to the forward-declared upvalues so F.camLock can expose them
-_clLockToggle = clLockToggle
-_clGetLocked  = function() return _lockedPlayer end
+
+-- lock visualizer: highlight the locked target + a line to it
+RunService.RenderStepped:Connect(function()
+    local plr  = _lockedPlayer
+    local char = plr and plr.Character
+    if _lockHLOn and char then
+        if not (_lockHL and _lockHL.Parent) then
+            _lockHL = Instance.new("Highlight")
+            _lockHL.FillTransparency = 0.6; _lockHL.OutlineTransparency = 0
+            _lockHL.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            _lockHL.Parent = workspace
+        end
+        _lockHL.Adornee = char
+        _lockHL.FillColor = _lockHLColor
+        _lockHL.OutlineColor = _lockHLColor
+        _lockHL.Enabled = true
+    elseif _lockHL then
+        _lockHL.Enabled = false; _lockHL.Adornee = nil
+    end
+    if _lockLine then
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local cam = workspace.CurrentCamera
+        if _lockLineOn and hrp and cam then
+            local sp, on = cam:WorldToViewportPoint(hrp.Position)
+            if on then
+                local vp = cam.ViewportSize
+                _lockLine.From = Vector2.new(vp.X / 2, vp.Y)
+                _lockLine.To   = Vector2.new(sp.X, sp.Y)
+                _lockLine.Color = _lockLineColor
+                _lockLine.Visible = true
+            else _lockLine.Visible = false end
+        else
+            _lockLine.Visible = false
+        end
+    end
+end)
+
+-- expose lock + customization to F.camLock (defined later, outside this scope)
+_lockApi = {
+    toggle            = clLockToggle,
+    getLocked         = function() return _lockedPlayer end,
+    setMode           = function(m) _lockMode = tostring(m) end,
+    setHighlight      = function(b) _lockHLOn = b == true end,
+    setHighlightColor = function(c) if typeof(c) == "Color3" then _lockHLColor = c end end,
+    setLine           = function(b) _lockLineOn = b == true end,
+    setLineColor      = function(c) if typeof(c) == "Color3" then _lockLineColor = c end end,
+}
 
 RunService.RenderStepped:Connect(function(dt)
     -- Fast early-out: skip the entire camlock per-frame when nothing
@@ -1477,8 +1522,9 @@ RunService.Heartbeat:Connect(function(dt)
         local hitPlr, hitPart, bestD = nil, nil, math.huge
         for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
             if plr == lplr then continue end
-            -- when a target is locked, only the locked player counts
-            if _lockedPlayer and plr ~= _lockedPlayer then continue end
+            -- triggerbot only fires on the LOCKED target: skip everyone if
+            -- nothing is locked, and skip anyone who isn't the locked player
+            if (not _lockedPlayer) or (plr ~= _lockedPlayer) then continue end
             if F.whitelist and F.whitelist.contains(plr) then continue end
             if TrigSettings.TeamCheck and plr.Team == lplr.Team then continue end
             local char = plr.Character; if not char then continue end
@@ -3094,8 +3140,13 @@ F.camLock = {
     isActive   = function() return CamLockSettings.Enabled end,
     -- manual single-target lock (shared by camlock + triggerbot). lockToggle
     -- returns (isLocked, player); getLocked returns the locked player or nil.
-    lockToggle = function() if _clLockToggle then return _clLockToggle() end return false, nil end,
-    getLocked  = function() if _clGetLocked then return _clGetLocked() end return nil end,
+    lockToggle = function() if _lockApi then return _lockApi.toggle() end return false, nil end,
+    getLocked  = function() if _lockApi then return _lockApi.getLocked() end return nil end,
+    setLockMode           = function(m) if _lockApi then _lockApi.setMode(m) end end,
+    setLockHighlight      = function(b) if _lockApi then _lockApi.setHighlight(b) end end,
+    setLockHighlightColor = function(c) if _lockApi then _lockApi.setHighlightColor(c) end end,
+    setLockLine           = function(b) if _lockApi then _lockApi.setLine(b) end end,
+    setLockLineColor      = function(c) if _lockApi then _lockApi.setLineColor(c) end end,
     setFov     = function(n) CamLockSettings.FOVRadius = math.clamp(tonumber(n) or 200, 1, 2000) end,
     setHitPart = function(s) CamLockSettings.TargetPart = tostring(s) end,
     setMode    = function(s) CamLockSettings.Mode = tostring(s) end,
