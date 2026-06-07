@@ -4309,31 +4309,33 @@ F.forceChat = (function()
     local StarterGui = game:GetService("StarterGui")
     local TextChatService = game:GetService("TextChatService")
 
-    -- Force the FULL chat on (window/messages + the input box). We keep
-    -- re-applying because games that hide chat usually re-disable it, so a
-    -- one-shot enable doesn't stick.
-    local function applyOn()
+    -- Apply chat state. The input box (chatbox) is ALWAYS kept usable; only
+    -- the message window (and bubbles) follow `showWindow`:
+    --   on  -> message window visible  (full chat)
+    --   off -> message window hidden, but you can still type
+    -- Kept re-applied on a loop so the game can't override it.
+    local function applyState(showWindow)
         pcall(function()
             StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
         end)
         if TextChatService then
             for _, c in ipairs(TextChatService:GetDescendants()) do
-                if c:IsA("ChatWindowConfiguration")
-                or c:IsA("ChatInputBarConfiguration")
-                or c:IsA("BubbleChatConfiguration") then
-                    pcall(function() c.Enabled = true end)
+                if c:IsA("ChatInputBarConfiguration") then
+                    pcall(function() c.Enabled = true end)          -- chatbox stays
+                elseif c:IsA("ChatWindowConfiguration") or c:IsA("BubbleChatConfiguration") then
+                    pcall(function() c.Enabled = showWindow end)    -- message display
                 end
             end
         end
     end
 
-    -- keep-alive loop while the toggle is on
+    -- keep-alive loop; runs while a state is set ("on"/"off"), exits on unload
     local function ensureLoop()
         if G._forceChatLoop then return end
         G._forceChatLoop = true
         task.spawn(function()
-            while G.forceChatActive do
-                applyOn()
+            while G.forceChatState do
+                applyState(G.forceChatState == "on")
                 task.wait(2)
             end
             G._forceChatLoop = false
@@ -4342,20 +4344,27 @@ F.forceChat = (function()
 
     local function start()
         G.forceChatActive = true
+        G.forceChatState  = "on"     -- message window + chatbox
         ensureLoop()
-        applyOn()
+        applyState(true)
     end
 
-    -- Off = stop forcing and restore normal chat, INCLUDING the chatbox, so
-    -- turning it off brings the chat (and the box) back rather than removing
-    -- the input.
+    -- Off hides the message window (where people's messages appear) but keeps
+    -- the chatbox so you can still type.
     local function stop()
-        G.forceChatActive = false   -- loop exits on its own
-        applyOn()                   -- leave chat + chatbox restored
+        G.forceChatActive = false
+        G.forceChatState  = "off"    -- window hidden, chatbox kept
+        ensureLoop()
+        applyState(false)
     end
 
     local toggle = makeToggle(start, stop, "forceChatActive")
-    toggle.fullStop = stop
+    -- unload: stop the loop and restore the full normal chat
+    toggle.fullStop = function()
+        G.forceChatActive = false
+        G.forceChatState  = nil      -- loop exits
+        applyState(true)
+    end
     return toggle
 end)()
 
