@@ -1516,9 +1516,12 @@ RunService.Heartbeat:Connect(function(dt)
         return
     end
 
-    -- find best player inside FOV.
+    -- find best player inside FOV. Throttle the scan to ~120 Hz REGARDLESS of
+    -- whether we currently have a target -- the old `or _trigHitPlr == nil`
+    -- meant that with no one in the FOV (i.e. most of the time) the full
+    -- player+part scan ran every single frame, which tanked fps.
     _trigScanAccum = _trigScanAccum + (dt or 0)
-    if _trigScanAccum >= (1 / 120) or _trigHitPlr == nil then
+    if _trigScanAccum >= (1 / 60) then
         _trigScanAccum = 0
         local hitPlr, hitPart, bestD = nil, nil, math.huge
         for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
