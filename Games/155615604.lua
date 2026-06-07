@@ -766,6 +766,10 @@ hook.games.prisonLife = (function()
             or char:GetAttribute("EquippedHostileTool") == true
     end
 
+    -- which teams the kill aura is allowed to target (default: all). The
+    -- "Target teams" dropdown narrows this down.
+    local targetTeams = { inmate = true, guard = true, criminal = true }
+
     local function _isEnemy(player)
         local myT    = (myTeamName() or ""):lower()
         local theirT = (player.Team and player.Team.Name or ""):lower()
@@ -787,6 +791,9 @@ hook.games.prisonLife = (function()
         end
         local myCat    = cat(myT)
         local theirCat = cat(theirT)
+
+        -- only target teams the user has enabled in "Target teams"
+        if not targetTeams[theirCat] then return false end
 
         if myCat == theirCat then return false end  -- same category
 
@@ -882,6 +889,13 @@ hook.games.prisonLife = (function()
             start    = auraStart,
             stop     = auraStop,
             isActive = function() return auraActive end,
+            setTargetTeam = function(name, on)
+                local s = tostring(name):lower()
+                local key = (s:find("criminal") and "criminal")
+                    or ((s:find("inmate") or s:find("prisoner")) and "inmate")
+                    or ((s:find("guard") or s:find("police")) and "guard")
+                if key then targetTeams[key] = (on == true) end
+            end,
         },
         noSpread   = {
             start    = noSpreadStart,
@@ -972,6 +986,10 @@ regToggle(Aim, "PL_KillAura", "Kill aura", false, function(v)
         hook.utils.setStrictVisibleCheck(false)
     end
 end):AddKeybind(Enum.KeyCode.F, "Killaura Toggle")
+-- which teams the kill aura is allowed to target (all on by default)
+regToggle(Aim, "PL_AuraInmates",   "Target inmates",   true, function(v) pl.killAura.setTargetTeam("inmate", v) end)
+regToggle(Aim, "PL_AuraGuards",    "Target guards",    true, function(v) pl.killAura.setTargetTeam("guard", v) end)
+regToggle(Aim, "PL_AuraCriminals", "Target criminals", true, function(v) pl.killAura.setTargetTeam("criminal", v) end)
 Aim:NewLabel("Auto-shoots the nearest visible enemy. Range/fire-rate are read from the equipped gun.", "left")
 
 Aim:NewSection("Hit feedback")
