@@ -1778,6 +1778,13 @@ RunService.RenderStepped:Connect(function(dt)
     end
     if not CamLockSettings.Enabled then clStickyTarget = nil; return end
     if G.freecamActive then return end
+    -- only lock when the mouse is locked to center (first person OR shift lock)
+    -- or while holding right click; free-mouse third person is left alone
+    if not (UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+        or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then
+        clStickyTarget = nil
+        return
+    end
     -- Tool Check: don't lock while we have no tool equipped
     if CamLockSettings.ToolCheck and not lpHasTool() then return end
     local part = clFindTarget(); if not part then return end
