@@ -4338,10 +4338,10 @@ F.forceChat = (function()
         end)
         if TextChatService then
             for _, c in ipairs(TextChatService:GetDescendants()) do
-                if c:IsA("ChatInputBarConfiguration") then
-                    pcall(function() c.Enabled = true end)          -- chatbox stays
-                elseif c:IsA("ChatWindowConfiguration") or c:IsA("BubbleChatConfiguration") then
-                    pcall(function() c.Enabled = showWindow end)    -- message display
+                if c:IsA("ChatInputBarConfiguration") or c:IsA("BubbleChatConfiguration") then
+                    pcall(function() c.Enabled = true end)          -- chatbox + bubbles stay
+                elseif c:IsA("ChatWindowConfiguration") then
+                    pcall(function() c.Enabled = showWindow end)    -- only the message window
                 end
             end
         end
