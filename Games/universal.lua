@@ -41,7 +41,7 @@ Target:NewKeybind("Lock / unlock target", Enum.KeyCode.E, function()
     else
         notify("No valid target found", 2, "alert")
     end
-end)
+end, function() return cam.getLocked() ~= nil end)   -- keybind list lights up while locked
 -- how the lock picks who: nearest to crosshair / screen center / you
 regDropdown(Target, "LockPriority", "Lock priority", "Mouse",
     { "Mouse", "Camera", "Distance" }, false, function(v) cam.setLockMode(v) end)

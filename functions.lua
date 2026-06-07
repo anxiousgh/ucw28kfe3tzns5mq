@@ -1485,6 +1485,7 @@ local function trigIsVisible(plr)
 end
 
 local _trigLastShot = 0
+local _trigFiring   = false   -- a click (down->up) is in progress
 local _trigCurrentPart = nil  -- currently-best target part this frame, for ShowTarget
 local _trigScanAccum = 0
 local _trigHitPlr, _trigHitPart = nil, nil
@@ -1577,13 +1578,22 @@ RunService.Heartbeat:Connect(function(dt)
     if not TrigSettings.Enabled then return end
     -- Tool Check: don't fire a click while we have no tool equipped
     if TrigSettings.ToolCheck and not lpHasTool() then return end
-    if (tick() - _trigLastShot) * 1000 < TrigSettings.ClickDelay then return end
     if not hitPlr then return end
+    if _trigFiring then return end                          -- one click at a time
+    -- ClickDelay 0 -> still leave a tiny gap so we don't spam faster than the
+    -- game can register, which made it look like it only fired once
+    local minGap = math.max(TrigSettings.ClickDelay, 35)
+    if (tick() - _trigLastShot) * 1000 < minGap then return end
     _trigLastShot = tick()
-    pcall(function()
+    _trigFiring   = true
+    -- proper press THEN release on separate frames: a same-frame down+up reads
+    -- as a single held press, so semi-auto guns only fired once until you moved
+    task.spawn(function()
         local vim = VirtualInputManager
-        vim:SendMouseButtonEvent(0,0,0,true,game,0)
-        vim:SendMouseButtonEvent(0,0,0,false,game,0)
+        pcall(function() vim:SendMouseButtonEvent(0, 0, 0, true,  game, 0) end)
+        task.wait()
+        pcall(function() vim:SendMouseButtonEvent(0, 0, 0, false, game, 0) end)
+        _trigFiring = false
     end)
 end)
 end  -- end camlock + triggerbot scope

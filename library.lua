@@ -2229,7 +2229,7 @@ function library:Init(key)
             return ToggleFunctions
         end
 
-        function Components:NewKeybind(text, default, callback)
+        function Components:NewKeybind(text, default, callback, isOnFn)
             text = text or "keybind"
             default = default or Enum.KeyCode.P
             callback = callback or function() end
@@ -2440,6 +2440,9 @@ function library:Init(key)
                 name   = text,
                 getKey = function() return ChosenKey end,
                 setKey = function(k) if type(k) == "string" then ChosenKey = k; keybindButtonLabel.Text = (k == "" and "None") or k end end,
+                -- optional: lets the on-screen keybind list light up (accent)
+                -- when this action is "active" (e.g. a target is locked)
+                isOn   = (type(isOnFn) == "function") and isOnFn or nil,
             })
 
             local KeybindFunctions = {}
