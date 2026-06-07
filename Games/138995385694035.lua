@@ -30,6 +30,9 @@ do
     local makeToggle          = hook.util.makeToggle
     local G                   = hook.util.state
     local _uprightTp          = hook.uprightTp
+    -- ragebot stayed in functions.lua; its current-target getter is reached
+    -- through the exposed API (knifeBot/forceHit use it for "current target")
+    local rbGetTarget         = hook.ragebot and hook.ragebot.getTarget
 
 
 -- ============================================================
@@ -1532,7 +1535,7 @@ hook.games.hoodCustoms.knifeBot = (function()
     -- the loader also flips the UI toggles off so the GUI matches.
     local function muteRangedAutos()
         pcall(function()
-            if RageSettings then RageSettings.AutoShoot = false end
+            if hook.ragebot and hook.ragebot.setAutoShoot then hook.ragebot.setAutoShoot(false) end
         end)
         G.hcForceHitActive = false
         pcall(function()

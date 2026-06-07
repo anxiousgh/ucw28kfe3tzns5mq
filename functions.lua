@@ -3201,6 +3201,7 @@ F.ragebot = {
     addTarget   = rbAddTarget,
     unlock      = rbUnlock,
     tpBehind    = rbTpBehind,
+    getTarget   = rbGetTarget,   -- current highest-priority target (used by HC knifeBot/forceHit)
     setSilentForce  = function(b) RageSettings.SilentForce = b == true end,
     setSilentMethod = function(s) RageSettings.SilentMethod = tostring(s) end,
     setShowLine     = function(b) RageSettings.ShowLine = b == true end,
