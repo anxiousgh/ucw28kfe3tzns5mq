@@ -7683,6 +7683,11 @@ end)()
 
 F.games.bms = (function()
     local RS = game:GetService("ReplicatedStorage")
+    -- BMS is game-specific (Blockerman's Minesweeper). Its load-time setup
+    -- (namecall hook, token capture, auto-capture loop) must ONLY run in that
+    -- game -- otherwise it hooks __namecall and spams [BMS] logs on every other
+    -- game. There's no BMS UI yet, so this just keeps it fully dormant.
+    local IS_BMS = (game.PlaceId == 7871169780)
 
     local function getPlaceFlag()
         local ev = RS:FindFirstChild("Events")
@@ -7716,7 +7721,7 @@ F.games.bms = (function()
         end
         return false
     end
-    if not getgenv()._BMS_PLACEFLAG_REF then
+    if IS_BMS and not getgenv()._BMS_PLACEFLAG_REF then
         if not resolveRefSync() then
             task.defer(function()
                 local ev = RS:WaitForChild("Events", 30)
@@ -7731,7 +7736,7 @@ F.games.bms = (function()
             end)
         end
     end
-    if not getgenv()._BMS_HOOK_INSTALLED and hookmetamethod then
+    if IS_BMS and not getgenv()._BMS_HOOK_INSTALLED and hookmetamethod then
         getgenv()._BMS_HOOK_INSTALLED = true
         local _old
         _old = hookmetamethod(game, "__namecall", function(self, ...)
@@ -7745,7 +7750,7 @@ F.games.bms = (function()
             return _old(self, ...)
         end)
         print("[BMS] __namecall hook installed (hookmetamethod available)")
-    elseif not hookmetamethod then
+    elseif IS_BMS and not hookmetamethod then
         warn("[BMS] hookmetamethod not available on this executor - use manual token input")
     end
 
@@ -7815,18 +7820,20 @@ F.games.bms = (function()
     -- this point) and a retry loop in case the LocalScript that
     -- creates the token hasn't run yet. Retries every 2s for up to
     -- 30s, exits as soon as we get a token.
-    task.spawn(function()
-        local tries = 0
-        while not getgenv()._BMS_TOKEN and tries < 15 do
-            autoCaptureToken()
-            if getgenv()._BMS_TOKEN then return end
-            tries = tries + 1
-            task.wait(2)
-        end
-        if not getgenv()._BMS_TOKEN then
-            warn("[BMS] auto-capture gave up; place one flag manually OR enter the token via the UI.")
-        end
-    end)
+    if IS_BMS then
+        task.spawn(function()
+            local tries = 0
+            while not getgenv()._BMS_TOKEN and tries < 15 do
+                autoCaptureToken()
+                if getgenv()._BMS_TOKEN then return end
+                tries = tries + 1
+                task.wait(2)
+            end
+            if not getgenv()._BMS_TOKEN then
+                warn("[BMS] auto-capture gave up; place one flag manually OR enter the token via the UI.")
+            end
+        end)
+    end
 
     -- ---- per-tile helpers ----
     local function tileState(tile)
@@ -7860,7 +7867,7 @@ F.games.bms = (function()
         _stateCache[t] = s
         return s
     end
-    do
+    if IS_BMS then
         local parts = getParts()
         if parts then
             parts.DescendantAdded:Connect(function(d)
