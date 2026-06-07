@@ -1,18 +1,10 @@
--- decay.lua / vampireware functions module
--- GUI-agnostic: extracted gameplay logic from vampireware.lua
--- Usage:
---   local F = loadstring(game:HttpGet('https://raw.githubusercontent.com/anxiousgh/asdasdasdasdasd/main/functions.lua'))()
---   F.fly.toggle(); F.fly.setSpeed(80)
---   F.aimbot.setEnabled(true); F.aimbot.setFov(120); F.aimbot.setHitPart('Head')
---   F.esp.toggle(); F.esp.setBox(true)
--- See bottom of file for the full API table.
+-- witherhook // functions.lua
+-- Shared backend used by every game (Games/main.lua + universal.lua):
+-- movement, desync, visuals, aim/targeting, players, prompts, utils.
+-- Each supported game's own logic lives in its Games/<placeId>.lua file.
 
--- ============================================================
+
 --  VERSION  (bumped on every push so you can verify which build
---           is actually running). Look at the watermark + load
---           notification to compare against the latest commit
---           on GitHub. Format: "YYYY-MM-DD HH:MM <short summary>"
--- ============================================================
 local SCRIPT_VERSION = "v1.39.1"
 
 --// services
@@ -26,8 +18,6 @@ local lplr             = plrs.LocalPlayer
 local Camera           = workspace.CurrentCamera
 
 --// forward-declare the public API table so functions defined below can
---   reference it (otherwise `F.games` etc. resolve to a global lookup that
---   stays nil even after `local F = {}` further down).
 local F
 
 --// cached player list
@@ -36,7 +26,6 @@ plrs.PlayerAdded:Connect(function() _cachedPlayers = plrs:GetPlayers() end)
 plrs.PlayerRemoving:Connect(function() task.defer(function() _cachedPlayers = plrs:GetPlayers() end) end)
 
 --// no-op GUI stubs (the original script wired these to the legacy GUI;
---   we keep the calls to preserve behavior without doing anything visible)
 
 --// shared state
 local G = { speedValue = 2 }
@@ -91,12 +80,8 @@ local RageSettings = {
     AutoShoot=false, AutoShootDist=50, AutoShootVis=true, AutoShootRequireTool=false,
     AutoShootCooldown=100, EquipDelay=0.5, FFCheck=true,
     -- when on, equip AutoShootEquipTool (from backpack) the moment
-    -- a target enters AutoShootDist range, before firing.
     AutoShootEquip=false, AutoShootEquipTool="",
     -- post-knocked grace window (ms). If the target was seen knocked
-    -- within the last N ms, hold fire even if they currently read as
-    -- alive - covers the brief respawn window where the old corpse
-    -- is still selectable but the new character isn't there yet.
     KnockedGraceDelay=0,
     SilentForce=false, SilentMethod="All",
     SpeedPanic=false, SpeedPanicVal=0,
@@ -105,11 +90,6 @@ local RageSettings = {
     AutoSwitch=true, NotifyTarget=true,
     SwitchByMouse=false,
     -- Priority mode for rbGetTarget. One of:
-    --   "Closest"         - world distance from local HRP (default)
-    --   "Mouse"           - screen distance from cursor
-    --   "Camera"          - smallest angle from camera lookvector
-    --   "LowestHP"        - lowest Humanoid.Health first
-    --   "HighestThreat"   - close + holding a tool first
     Priority="Closest",
 }
 
@@ -131,21 +111,14 @@ local EspSettings = {
 
 local _rbTargetList = {}
 
--- ============================================================
 --  VISIBILITY HELPER (cache raw Raycast before any hooks)
--- ============================================================
 local rawRaycast = workspace.Raycast
 local _visParams = RaycastParams.new()
 _visParams.FilterType = Enum.RaycastFilterType.Exclude
 
 -- when strict, any raycast hit blocks visibility (even see-through /
--- no-collide / no-shadow parts). Default false matches the old "smart"
--- behavior that ignored decorative geometry.
 local _visStrict = false
 -- which point the visibility raycast STARTS from. One of:
---   "Camera" - workspace.CurrentCamera.CFrame.Position (default, classic)
---   "Head"   - lplr.Character.Head.Position
---   "Tool"   - currently-equipped Tool's Handle.Position, falls back to Head
 local _visOrigin = "Camera"
 local function _visGetOrigin()
     local mode = _visOrigin
@@ -187,9 +160,7 @@ local function isReallyVisible(fromPos, toPos, ignoreList)
     return true
 end
 
--- ============================================================
 --  MOVEMENT: FLY / SPEED / BHOP / INFJUMP / ANTIAFK / CLICKTP
--- ============================================================
 local function stopFly()
     G.flyActive=false; if G.flyConn then G.flyConn:Disconnect(); G.flyConn=nil end
 end
@@ -213,22 +184,7 @@ local function startFly()
     end)
 end
 
--- ============================================================
 --  WALKSPEED  (real Humanoid.WalkSpeed override with anti-restore)
--- ============================================================
---  Forces Humanoid.WalkSpeed every frame. We write on BOTH
---  Heartbeat AND BindToRenderStep at the lowest priority --
---  RenderStep's "Last" priority runs after every Heartbeat /
---  Stepped connection, immediately before the camera renders,
---  so it's the absolute latest point in the frame we can write.
---  This wins the race against game scripts that try to clamp
---  WalkSpeed back to 16 on Heartbeat. Previously the game's
---  Heartbeat connection often ran after ours and we'd lose the
---  current frame's value -- on respawn the game's controller
---  hadn't initialized yet so our value stuck, which is why the
---  slider only "took effect" after a respawn.
---  Default game walkspeed is 16; stop() restores 16.
--- ============================================================
 G.walkspeedValue  = 16
 G.walkspeedActive = false
 local _WS_BIND_NAME = "_F_WalkspeedEnforce"
@@ -256,22 +212,13 @@ local function startWalkspeed()
     if G._wsHeartConn then G._wsHeartConn:Disconnect() end
     G._wsHeartConn = RunService.Heartbeat:Connect(_wsEnforceOnce)
     -- BindToRenderStep at the latest possible priority (after every
-    -- Heartbeat/Stepped). Wrapped in pcall because the bind name
-    -- might already be taken if start() is called twice.
     pcall(function() RunService:UnbindFromRenderStep(_WS_BIND_NAME) end)
     pcall(function()
         RunService:BindToRenderStep(_WS_BIND_NAME, Enum.RenderPriority.Last.Value + 1, _wsEnforceOnce)
     end)
 end
 
--- ============================================================
 --  JUMPPOWER  (real Humanoid.JumpPower override with anti-restore)
--- ============================================================
---  Same dual-event enforcement as walkspeed (Heartbeat +
---  RenderStep Last) PLUS re-enables the Jumping state every
---  tick so games that block jumping via SetStateEnabled get
---  overridden too.
--- ============================================================
 G.jumpPowerValue  = 50
 G.jumpPowerActive = false
 local _JP_BIND_NAME = "_F_JumpPowerEnforce"
@@ -322,9 +269,7 @@ local function startJumpPower()
     end)
 end
 
--- ============================================================
 --  CFRAME SPEED  (camera-WASD-driven CFrame nudge - "speed hack")
--- ============================================================
 local function stopCframeSpeed()
     G.speedActive=false; if G.speedConn then G.speedConn:Disconnect(); G.speedConn=nil end
 end
@@ -349,23 +294,7 @@ end
 -- bhop: pure AssemblyLinearVelocity, Quake-style air accel
 local _bhopStepConn, _bhopJumpConn, _bhopAirFric, _bhopVel = nil, nil, 0, Vector3.zero
 
-
-
-
-
--- ============================================================
 --  FORCE-ENABLE JUMP
---  Defeats games that limit / disable jumping. Three common
---  mechanisms covered:
---    1. Humanoid:SetStateEnabled(Jumping, false) - we re-enable
---       on every Space press AND on every property write the
---       game makes via PropertyChangedSignal.
---    2. Humanoid.JumpPower = 0 / JumpHeight = 0 - we re-write
---       to a safe value whenever the game tries to zero them.
---    3. Custom jump counter that just decides not to fire
---       Humanoid.Jump = true - we directly write Humanoid.Jump
---       = true on Space press, bypassing the game's check.
--- ============================================================
 local _forceJumpConns = {}
 local function _fjClear()
     for _, c in ipairs(_forceJumpConns) do pcall(function() c:Disconnect() end) end
@@ -416,8 +345,6 @@ local function startForceJump()
         local hum = c and c:FindFirstChildOfClass("Humanoid")
         if hum then
             -- re-enable state + JumpPower right before the actual jump
-            -- (handles "you jumped 3 times, jump is on cooldown" cases
-            -- where the game flipped state/power right before this press)
             _fjEnforce(hum)
             pcall(function() hum.Jump = true end)
         end
@@ -439,11 +366,6 @@ local function startAntiAfk()
         if t>=55 then
             t=0
             -- firesignal(lplr.Idled) was here but is a no-op (and a footgun):
-            -- the connections to lplr.Idled were disabled in startAntiAfk above,
-            -- so firing the signal does nothing. If a future change re-enables
-            -- those connections it would actively *trigger* the AFK kick.
-            -- The VirtualInputManager W-press below is what actually keeps the
-            -- engine considering us "active".
             pcall(function()
                 local vim=VirtualInputManager
                 vim:SendKeyEvent(true,Enum.KeyCode.W,false,game)
@@ -482,12 +404,7 @@ local function startClickTp()
     end)
 end
 
--- ============================================================
 --  AUTO-RESPAWN / RESPAWN
--- ============================================================
--- strip a CFrame down to position + horizontal yaw so the player always
--- spawns upright (otherwise restoring a ragdolled CFrame leaves them lying
--- down for several seconds while the engine reconciles the state)
 local function _uprightCF(cf)
     if not cf then return nil end
     local lv = cf.LookVector
@@ -498,7 +415,6 @@ local function _uprightCF(cf)
 end
 
 -- force the new humanoid out of any ragdoll / sit / platform-stand state
--- the moment it spawns, so we don't lay on the floor briefly
 local function _forceStanding(newChar)
     if not newChar then return end
     local hum = newChar:WaitForChild("Humanoid", 3)
@@ -518,16 +434,8 @@ local function _forceStanding(newChar)
 end
 
 -- generic upright-teleport helper used by every TP path so we never tip
--- over into a ragdoll on landing.
---   char     - lplr.Character (used for the standing fix)
---   hrp      - HumanoidRootPart (BasePart)
---   position - Vector3 destination
---   faceDir  - Vector3 to face (only horizontal component is used).
---              Pass nil to keep current horizontal facing.
 local function _uprightTp(char, hrp, position, faceDir)
     -- pre-clean: if we're ragdolled / upside-down / sitting, joint
-    -- forces will yank HRP back the moment after we set CFrame. Clear
-    -- those states FIRST so the humanoid stops fighting the teleport.
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
         if hum then
@@ -553,13 +461,11 @@ local function _uprightTp(char, hrp, position, faceDir)
         hrp.AssemblyAngularVelocity = Vector3.zero
     end)
     -- notify desync so its Heartbeat-captured realCF gets updated to the
-    -- new position. otherwise its RenderStepped restore would undo our TP.
     if F and F.desync and F.desync.notifyTeleport then
         F.desync.notifyTeleport(newCF)
     end
     if char then _forceStanding(char) end
 end
-
 
 local function cmdRe()
     local char=lplr.Character; if not char then return end
@@ -567,8 +473,6 @@ local function cmdRe()
     if hrp then G.savedCFrame=hrp.CFrame end
     lplr.CharacterAdded:Once(function(newChar)
         -- snapshot G.savedCFrame BEFORE the yield. Otherwise a second
-        -- cmdRe / autoRe Once may set it to nil during task.wait(0.1)
-        -- and we'd assign nil to CFrame ("CoordinateFrame expected, got nil")
         local cf = G.savedCFrame
         G.savedCFrame = nil
         if cf then
@@ -593,15 +497,7 @@ local function cmdRe()
     end)
 end
 
--- ============================================================
 --  NOCLIP / FULLBRIGHT / FREECAM / ZOOM
--- ============================================================
--- Standard noclip: just override CanCollide=false every Heartbeat while
--- active. We deliberately do NOT use getconnections():Disable() on the
--- engine's CanCollide listeners - that left collision in a broken state
--- on toggle off (engine internals stay desynced even after Enable()).
--- Per-frame override is enough; on stop we just stop overriding and the
--- engine takes back over.
 local function stopNoclip()
     G.noclipActive=false
     pcall(function() RunService:UnbindFromRenderStep("NoclipStep") end)
@@ -609,9 +505,6 @@ local function stopNoclip()
     if G.noclipConn and type(G.noclipConn)~="boolean" then G.noclipConn:Disconnect() end
     G.noclipConn=nil
     -- restore CanCollide on the parts we were overriding. The engine
-    -- doesn't auto-restore once we stop writing false - parts stay at
-    -- the last value, so the character keeps passing through walls
-    -- after the toggle is off. Set them back to true here.
     local c = lplr.Character
     if c then
         for _, name in ipairs({"HumanoidRootPart","UpperTorso","Torso","Head","LowerTorso"}) do
@@ -625,8 +518,6 @@ end
 local function startNoclip()
     G.noclipActive=true
     -- only the 5 collision-relevant parts need CanCollide=false; iterating
-    -- char:GetDescendants() every Heartbeat (accessories, decals, attachments,
-    -- scripts) was wasted work. Audit flagged this as a freeze contributor.
     RunService:BindToRenderStep("NoclipStep", Enum.RenderPriority.First.Value, function()
         if not G.noclipActive then return end
         local c=lplr.Character; if not c then return end
@@ -676,8 +567,6 @@ local function startFreecam()
     G.freecamCF=cam.CFrame
     cam.CameraType=Enum.CameraType.Scriptable
     -- anchor body + zero walkspeed/jump on every (re)spawn while active.
-    -- without the CharacterAdded hook, the new character would drift away
-    -- from where freecam expected to anchor it after a respawn.
     local function anchorChar(char)
         if not char then return end
         local hrp=char:WaitForChild("HumanoidRootPart",5)
@@ -737,9 +626,7 @@ local function startZoom()
     G.zoomConn=lplr.CharacterAdded:Connect(function() task.wait(0.1); applyZoom() end)
 end
 
--- ============================================================
 --  SPIN / FLIP / ICE / BLINK
--- ============================================================
 local function stopFlip()
     G.flipActive=false
     if G._flipHb then G._flipHb:Disconnect(); G._flipHb=nil end
@@ -759,10 +646,6 @@ local function startFlip()
         local hrp=char:WaitForChild("HumanoidRootPart",5); if not hrp then return end
         local hum=char:FindFirstChildOfClass("Humanoid")
         -- camera offset zeroed: BindToRenderStep at First priority below
-        -- restores HRP BEFORE the camera samples it, so the camera
-        -- naturally stays at the local upright head position. No offset
-        -- needed - and the previous -5 offset put the camera above the
-        -- head because the timing fixed itself differently here.
         if hum then hum.CameraOffset=Vector3.zero end
         local _real={}; local _spoofing=false
         if G._flipHb then G._flipHb:Disconnect() end
@@ -775,7 +658,6 @@ local function startFlip()
             hrp.CFrame=CFrame.new(hrp.Position)*CFrame.fromEulerAnglesYXZ(0,yaw,0)*CFrame.Angles(math.pi,0,0)
         end)
         -- restore at First priority so the default camera sees the upright
-        -- local HRP, not the spoofed flipped one
         RunService:BindToRenderStep("FlipRestore", Enum.RenderPriority.First.Value, function()
             if _spoofing and _real[1] then
                 if hrp and hrp.Parent then hrp.CFrame=_real[1]; hrp.AssemblyLinearVelocity=_real[2] end
@@ -790,10 +672,6 @@ local function startFlip()
 end
 
 -- ---- Tilt 90° (sideways roll) ----
--- Same Heartbeat-spoof / RenderStep-First-restore pattern as flip, but
--- the spoof multiplies by CFrame.Angles(0,0,math.pi/2) instead of (pi,0,0).
--- Server sees us lying on our side; locally we're upright (camera locked
--- to local head via First-priority restore).
 local function stopTilt()
     G.tiltActive=false
     if G._tiltHb then G._tiltHb:Disconnect(); G._tiltHb=nil end
@@ -837,8 +715,6 @@ local function startTilt()
 end
 
 -- ---- Backwards (180° yaw - server sees us facing the opposite way) ----
--- Useful as anti-aim: enemies' silent aim/aimbot points at the back of
--- our head while our local head is facing the other way.
 
 local function stopSpin()
     G.spinActive=false
@@ -900,23 +776,14 @@ local function startIce()
 end
 
 -- Sticky emotes module lives down by F.stickyEmote registration
--- (search for "F.stickyEmote = (function()") so it can build the
--- F.stickyEmote table directly without consuming top-level chunk
--- locals. Luau has a 200-local-register-per-function limit and the
--- chunk was right at it.
 
-
--- ============================================================
 --  CAMERA FOV
--- ============================================================
 local function setFov(n)
     CUSTOM_FOV = n
     pcall(function() workspace.CurrentCamera.FieldOfView = n end)
 end
 
--- ============================================================
 --  PLAYERS: GOTO / VIEW / FLING
--- ============================================================
 local function findPlayerByName(target)
     if not target then return nil end
     local p = plrs:FindFirstChild(target)
@@ -1004,27 +871,18 @@ local function flingPlayer(plr)
     end)
 end
 
--- ============================================================
 --  FOLLOW PLAYER (pathfinding)
---  Continuously walks toward the target using PathfindingService.
---  Click to start, click again on the same target to stop.
--- ============================================================
 local _PathfindingService = game:GetService("PathfindingService")
 local _follow = {
     target = nil, conn = nil, path = nil, waypoints = {}, idx = 1,
     lastCompute = 0, viz = true, vizFolder = nil,
     -- Steering state read every Heartbeat by the steerConn loop.
-    -- Updated (but never interrupted) by the path worker.
     steerDir  = Vector3.zero,
     steerJump = false,
     steerConn = nil,
 }
 
 -- ---- pathfinding visualization ----
--- Spawns small neon spheres at each waypoint and thin neon parts
--- as line segments between consecutive waypoints. Jump waypoints
--- get a distinct color. The "current" waypoint (the one we're
--- walking toward this tick) is highlighted brighter.
 local function vizClear()
     if _follow.vizFolder then _follow.vizFolder:Destroy(); _follow.vizFolder = nil end
 end
@@ -1087,7 +945,6 @@ local function followStop()
     local hum = c and c:FindFirstChildOfClass("Humanoid")
     if hum then
         -- Move(0) halts the continuous direction set by the worker.
-        -- MoveTo(self) is a belt-and-suspenders stop for any legacy path.
         pcall(function() hum:Move(Vector3.zero, false) end)
         local hrp = c and c:FindFirstChild("HumanoidRootPart")
         if hrp then pcall(function() hum:MoveTo(hrp.Position) end) end
@@ -1109,9 +966,6 @@ local function _followGetTargetHRP()
 end
 
 -- Walk to a waypoint: issue MoveTo, then wait until either we get close
--- enough, the target/our character changes, or we time out (stuck on
--- geometry). Returns true if we made it, false if the worker should stop.
--- Polls per-Heartbeat (no task.wait) so close-enough detection is instant.
 
 local function followPlayer(plr)
     if typeof(plr) == "string" then plr = findPlayerByName(plr) end
@@ -1128,16 +982,6 @@ local function followPlayer(plr)
     })
 
     -- Classic Humanoid:MoveTo() + MoveToFinished:Wait() pattern.
-    -- The two-loop steerDir / steerConn approach was flaky in practice
-    -- because Humanoid:Move(dir, false) only persists for one physics
-    -- step before the default character controller overrides it, and
-    -- on games that write to the Humanoid every frame (HC) our calls
-    -- got silently clobbered - net result was no movement at all.
-    --
-    -- MoveTo issues a single walk command the humanoid honors until
-    -- it reaches the goal, hits the 8s timeout, or we issue a new
-    -- MoveTo. We re-issue every waypoint and bail out of the path
-    -- early if we get close to the actual target.
     task.spawn(function()
         local target = plr
         while _follow.target == target do
@@ -1157,8 +1001,6 @@ local function followPlayer(plr)
             end
 
             -- Recompute the path to the target's CURRENT position every 0.1s
-            -- and steer toward the next waypoint. Re-pathing this often keeps
-            -- us tight on a moving target instead of walking a stale path.
             local ok = pcall(function()
                 _follow.path:ComputeAsync(hrp.Position, thrp.Position)
             end)
@@ -1188,9 +1030,7 @@ local function followSetVisualize(v)
     if not _follow.viz then vizClear() else vizRebuild() end
 end
 
--- ============================================================
 --  AIMBOT CORE (drawing + closest target finder + namecall hook)
--- ============================================================
 local A_fovCircle, A_targetBox
 local cachedTarget, cachedHitPoint = nil, nil
 
@@ -1275,18 +1115,11 @@ local function aimFindClosest()
 end
 
 -- aimbot per-frame: update cached target + draw.
---
--- Fast early-out: if nothing in aimbot wants per-frame work
--- (Enabled, ShowFOV, ShowTarget all off), bail immediately. Avoids
--- a full Players scan / WorldToViewportPoint / GetMouseLocation per
--- frame while the feature is off - cumulative cost shows up as
--- "freezes" when combined with the other always-on loops.
 RunService.RenderStepped:Connect(function()
     if not AimbotSettings.Enabled
         and not AimbotSettings.ShowFOV
         and not AimbotSettings.ShowTarget then
         -- Cheap idle path: hide any drawings still left visible from
-        -- when the feature was last on, clear cached target, return.
         if cachedTarget then cachedTarget = nil; cachedHitPoint = nil end
         if A_fovCircle and A_fovCircle.Visible  then A_fovCircle.Visible  = false end
         if A_targetBox and A_targetBox.Visible  then A_targetBox.Visible  = false end
@@ -1318,8 +1151,6 @@ local function saDirection(origin, targetPos) return (targetPos - origin).Unit *
 
 if hookmetamethod then
     -- track tool presence with event-driven updates instead of per-frame
-    -- char:GetChildren() walks. Saves an unconditional RenderStepped that
-    -- ran forever even when aimbot was off.
     local hasTool = false
     local _toolWatchers = {}
     local function _refreshTool(c)
@@ -1341,17 +1172,11 @@ if hookmetamethod then
     if lplr.Character then _hookChar(lplr.Character) end
 
     -- guard against re-stacking on script reload: if we've already
-    -- installed __namecall, bail. Each stacked wrapper adds latency to
-    -- every Raycast call, which compounds freezing on rerun.
     if not getgenv()._F_NAMECALL_HOOKED then
         getgenv()._F_NAMECALL_HOOKED = true
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
         -- Cheap-bool early-outs FIRST. Roblox calls __namecall thousands of
-        -- times per second; the previous version did getnamecallmethod() +
-        -- 5 string compares for every single call before checking Enabled.
-        -- That overhead compounds with the ragebot/voidspam hooks and was
-        -- a freeze contributor.
         if not AimbotSettings.Enabled then return oldNamecall(...) end
         if not cachedTarget then return oldNamecall(...) end
         if not hasTool then return oldNamecall(...) end
@@ -1417,11 +1242,6 @@ end
 
 do  -- scope camlock + triggerbot locals so they don't count toward the
     -- top-level 200-local (register) limit. The RenderStepped/Heartbeat
-    -- connections below capture what they need as upvalues, so they keep
-    -- running after this block closes.
--- ============================================================
---  CAMLOCK CORE
--- ============================================================
 local CL_fovCircle
 if Drawing and Drawing.new then
     CL_fovCircle = Drawing.new("Circle")
@@ -1433,14 +1253,12 @@ end
 local clStickyTarget = nil
 
 -- true if WE currently have a Tool equipped (used by Tool Check on camlock +
--- triggerbot so they don't lock/click while we're empty-handed)
 local function lpHasTool()
     local c = lplr.Character
     return c ~= nil and c:FindFirstChildOfClass("Tool") ~= nil
 end
 
 -- relative mouse-move (executor global) used by camlock "Mouse" mode; nil if
--- the executor doesn't expose it
 local _mouseMoveRel = nil
 pcall(function() _mouseMoveRel = mousemoverel end)
 
@@ -1519,7 +1337,6 @@ local function clFindTarget()
             local char = sPlr.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             -- keep the sticky target ONLY while they're still inside the FOV;
-            -- once they leave it, drop them so the lock requires FOV again
             local checkPart = hrp and (char:FindFirstChild(CamLockSettings.TargetPart) or hrp)
             if checkPart then
                 local sp, onScreen = cam:WorldToViewportPoint(checkPart.Position)
@@ -1546,9 +1363,6 @@ end
 
 RunService.RenderStepped:Connect(function(dt)
     -- Fast early-out: skip the entire camlock per-frame when nothing
-    -- in the module wants work (both Enabled and ShowFOV are off).
-    -- Avoids repeated property writes to the FOV circle while the
-    -- feature is idle.
     if not CamLockSettings.Enabled and not CamLockSettings.ShowFOV then
         if clStickyTarget then clStickyTarget = nil end
         if CL_fovCircle and CL_fovCircle.Visible then CL_fovCircle.Visible = false end
@@ -1565,8 +1379,6 @@ RunService.RenderStepped:Connect(function(dt)
     if not CamLockSettings.Enabled then clStickyTarget = nil; return end
     if G.freecamActive then return end
     -- "Only in 1st Person": only lock when the mouse is locked to center
-    -- (first person OR shift lock) or while holding right click; free-mouse
-    -- third person is left alone. Off = lock regardless.
     if CamLockSettings.OnlyFirstPerson
         and not (UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
             or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then
@@ -1577,7 +1389,6 @@ RunService.RenderStepped:Connect(function(dt)
     if CamLockSettings.ToolCheck and not lpHasTool() then return end
     local part = clFindTarget(); if not part then return end
     -- Only visible: pause the lock while the target is behind cover; it
-    -- resumes automatically once they're in line of sight again
     if CamLockSettings.OnlyVisible and not clPartVisible(part) then return end
     local targetPos = CamLockSettings.Prediction
         and (part.Position + (part.AssemblyLinearVelocity * CamLockSettings.PredictionAmount))
@@ -1586,7 +1397,6 @@ RunService.RenderStepped:Connect(function(dt)
     local alpha = math.clamp(1 - (CamLockSettings.Smoothing ^ (dt * 60)), 0, 1)
     if CamLockSettings.Mode == "Mouse" then
         -- Mouse mode: nudge the MOUSE toward the target's on-screen position.
-        -- It doesn't rotate the camera, so it also works in third person.
         if _mouseMoveRel then
             local sp, onScreen = cam:WorldToViewportPoint(targetPos)
             if onScreen then
@@ -1595,11 +1405,8 @@ RunService.RenderStepped:Connect(function(dt)
                 local dist = math.sqrt(dx * dx + dy * dy)
                 if dist > 0.5 then
                     -- pure smoothed step (Smoothing controls the speed). Low
-                    -- smoothing -> alpha near 1 -> effectively snaps on its own.
                     local mvx, mvy = dx * alpha, dy * alpha
                     -- only floor to a 1px step so a sub-pixel value doesn't
-                    -- round to 0 and stall just short of the target -- this is
-                    -- the minimum to converge, not a snap
                     if math.abs(mvx) < 1 and math.abs(mvy) < 1 then
                         if dist <= 1 then
                             mvx, mvy = dx, dy           -- close the final pixel exactly
@@ -1618,9 +1425,7 @@ RunService.RenderStepped:Connect(function(dt)
     end
 end)
 
--- ============================================================
 --  TRIGGERBOT
--- ============================================================
 local TB_fovCircle, TB_targetBox
 if Drawing and Drawing.new then
     TB_fovCircle = Drawing.new("Circle"); TB_fovCircle.Thickness=1; TB_fovCircle.NumSides=100
@@ -1634,8 +1439,6 @@ if Drawing and Drawing.new then
 end
 
 -- map a chosen part name to the equivalent on the OTHER rig, so picking an
--- R15 name on an R6 character (or vice versa) still resolves to a real part
--- instead of silently falling back to HumanoidRootPart ("uses the default")
 local _PART_EQUIV = {
     -- R15 name -> R6 name
     UpperTorso = "Torso", LowerTorso = "Torso",
@@ -1691,8 +1494,6 @@ local _trigScanAccum = 0
 local _trigHitPlr, _trigHitPart = nil, nil
 RunService.Heartbeat:Connect(function(dt)
     -- Fast early-out: skip GetMouseLocation + camera lookup + everything
-    -- when triggerbot is fully idle. The old path still hit UIS +
-    -- workspace.CurrentCamera each frame even when nothing was on.
     if not TrigSettings.Enabled and not TrigSettings.ShowFOV and not TrigSettings.ShowTarget then
         if TB_fovCircle and TB_fovCircle.Visible then TB_fovCircle.Visible = false end
         if TB_targetBox and TB_targetBox.Visible then TB_targetBox.Visible = false end
@@ -1710,17 +1511,12 @@ RunService.Heartbeat:Connect(function(dt)
     end
 
     -- early-out: if nothing is asking for a target this frame, skip the
-    -- per-player + per-part scan entirely.
     if not TrigSettings.Enabled and not TrigSettings.ShowTarget then
         if TB_targetBox then TB_targetBox.Visible = false end
         return
     end
 
     -- find best player inside FOV.
-    -- TargetPart "All" → scan every BasePart and pick closest to mouse.
-    -- Throttle this scan (+ visibility raycasts) to ~120 Hz; at high fps it
-    -- was running hundreds of times a second and tanking frames. Click timing
-    -- is gated by ClickDelay anyway, so this doesn't hurt responsiveness.
     _trigScanAccum = _trigScanAccum + (dt or 0)
     if _trigScanAccum >= (1 / 120) or _trigHitPlr == nil then
         _trigScanAccum = 0
@@ -1790,9 +1586,7 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 end  -- end camlock + triggerbot scope
 
--- ============================================================
 --  RAGEBOT CORE
--- ============================================================
 local _rbMousePos = UserInputService:GetMouseLocation()
 UserInputService.InputChanged:Connect(function(inp)
     if inp.UserInputType == Enum.UserInputType.MouseMovement then
@@ -1803,8 +1597,6 @@ end)
 local rbCachedTarget = nil
 local _rbFaceStepBound = false
 -- Snapshot of Humanoid.AutoRotate before we forced it off lives on G
--- (G._rbFaceSavedAutoRotate) to avoid eating a top-level local slot -
--- the chunk function is right at Luau's 200-local-per-function limit.
 local rbOrbitAngle = 0
 
 -- target visualization
@@ -1819,7 +1611,7 @@ end
 local function ensureRBHighlight()
     if RB_outlineHL and RB_outlineHL.Parent then return RB_outlineHL end
     RB_outlineHL = Instance.new("Highlight")
-    RB_outlineHL.Name = "_decay_rb_outline"
+    RB_outlineHL.Name = "_wh_rb_outline"
     RB_outlineHL.FillTransparency    = 1
     RB_outlineHL.OutlineColor        = Color3.fromRGB(255, 80, 80)
     RB_outlineHL.OutlineTransparency = 0
@@ -1843,8 +1635,6 @@ local function rbIsVisible(plr)
 end
 
 -- Returns true if the target should be completely skipped from selection
--- (IgnoreKnocked mode). Separate from SkipKnocked which only blocks the
--- auto-shoot but keeps the target locked.
 local function rbIgnoreByKnocked(plr)
     if not RageSettings.IgnoreKnocked then return false end
     local hc = F and F.games and F.games.hoodCustoms
@@ -1854,7 +1644,6 @@ local function rbIgnoreByKnocked(plr)
 end
 
 -- score a candidate target for a priority mode. lower = better.
--- returns math.huge to exclude the candidate from selection.
 local function rbScoreTarget(plr, char, hrp, hum, lhrp, cam, mousePos, camPos, camLook)
     local mode = RageSettings.Priority or "Closest"
     if RageSettings.SwitchByMouse and mode == "Closest" then mode = "Mouse" end
@@ -1978,7 +1767,6 @@ local function rbTpBehind()
     horiz = horiz.Unit
 
     -- TpBehindDist=0 (default) puts us inside the target's HRP, larger values
-    -- step back along their look direction
     local position = hrp.Position - horiz * (RageSettings.TpBehindDist or 0)
     _uprightTp(lchar, lhrp, position, horiz)
 end
@@ -1986,8 +1774,6 @@ end
 -- ragebot per-frame: face target / orbit / cam snap / speed panic
 RunService.RenderStepped:Connect(function(dt)
     -- early-out when nothing is asking for ragebot work - skips the
-    -- rbGetTarget() player-iteration each frame at idle. Audit flagged
-    -- this as an always-on RenderStepped consumer.
     if not RageSettings.SilentForce
         and not RageSettings.AutoShoot
         and not RageSettings.ShowLine
@@ -2009,8 +1795,6 @@ RunService.RenderStepped:Connect(function(dt)
     rbCachedTarget = hrp
 
     -- target line origin: Bottom / Center / Top / Mouse
-    -- Always draw - even when target is off-screen or behind the camera
-    -- we project onto the screen edge so the line still points at them.
     if RB_targetLine then
         local function isFinite(n) return type(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge end
 
@@ -2024,7 +1808,6 @@ RunService.RenderStepped:Connect(function(dt)
             local toX, toY = sp.X, sp.Y
 
             -- if behind camera, mirror across screen center and push outward
-            -- (capped to a sane multiplier so we never produce huge numbers)
             if sp.Z < 0 then
                 local cx, cy = vs.X * 0.5, vs.Y * 0.5
                 toX = cx + (cx - toX) * 4
@@ -2032,7 +1815,6 @@ RunService.RenderStepped:Connect(function(dt)
             end
 
             -- if anything went non-finite during projection, hide instead of
-            -- snapping to (0,0) where Drawing renders NaN
             if not (isFinite(toX) and isFinite(toY)) then
                 RB_targetLine.Visible = false
             else
@@ -2080,11 +1862,6 @@ RunService.RenderStepped:Connect(function(dt)
         if not _rbFaceStepBound then
             _rbFaceStepBound = true
             -- Bind at Last+1 so we run AFTER everything:
-            --   * PlayerModule shiftlock (Camera priority, 200)
-            --   * Any game script using BindToRenderStep at arbitrary priorities
-            --   * Any game script using RenderStepped:Connect (fires at Last=2000)
-            -- Last+1 (2001) makes our HRP.CFrame write the final word that frame.
-            -- That's what fixes shiftlock / gun-aim systems still overriding us.
             RunService:BindToRenderStep("rbFaceStep", Enum.RenderPriority.Last.Value+1, function()
                 if not RageSettings.FaceTarget then
                     RunService:UnbindFromRenderStep("rbFaceStep")
@@ -2101,8 +1878,6 @@ RunService.RenderStepped:Connect(function(dt)
                 local char2=lplr.Character; if not char2 then return end
                 local lhrp2=char2:FindFirstChild("HumanoidRootPart"); if not lhrp2 then return end
                 -- Pin AutoRotate=false so the engine doesn't rotate the
-                -- character toward MoveDirection / camera between our writes.
-                -- Capture the user's original value once so we can restore.
                 local hum = char2:FindFirstChildOfClass("Humanoid")
                 if hum then
                     if G._rbFaceSavedAutoRotate == nil then
@@ -2126,7 +1901,6 @@ RunService.RenderStepped:Connect(function(dt)
             RunService:UnbindFromRenderStep("rbFaceStep")
             _rbFaceStepBound=false
             -- restore AutoRotate when face-target toggles off via the outer
-            -- guard (target lost, etc.), not via the inner self-unbind path
             local hum = lc:FindFirstChildOfClass("Humanoid")
             if hum and G._rbFaceSavedAutoRotate ~= nil then
                 pcall(function() hum.AutoRotate = G._rbFaceSavedAutoRotate end)
@@ -2151,14 +1925,11 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 -- silent force hooks (independent of aimbot).
--- Guard against re-stacking on script reload - ragebot's namecall+index
--- hooks compound the same freezing problem the aimbot ones did.
 if hookmetamethod and not getgenv()._F_RB_NAMECALL_HOOKED then
     getgenv()._F_RB_NAMECALL_HOOKED = true
     local rbOldNamecall
     rbOldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
         -- cheap bool / userdata checks first; only do getnamecallmethod
-        -- + string compares on the rare frames where ragebot is engaged
         if not RageSettings.SilentForce then return rbOldNamecall(...) end
         local part = rbCachedTarget; if not part then return rbOldNamecall(...) end
         if RageSettings.SilentMethod == "Mouse.Hit/Target" then return rbOldNamecall(...) end
@@ -2206,20 +1977,7 @@ if hookmetamethod and not getgenv()._F_RB_NAMECALL_HOOKED then
     end))
 end
 
--- ============================================================
 --  ANTI-KICK  (best-effort client-side kick interception)
--- ============================================================
---  Hooks __namecall to intercept and SILENTLY DROP:
---    - Player:Kick(...)       on the LocalPlayer (client API)
---    - DataModel:Shutdown()   game:Shutdown() / GuiService:Shutdown()
---    - TeleportService:Teleport*(...)  on the LocalPlayer (soft-kick)
---  Note: server-initiated disconnects (Player:Kick called server-side)
---  still happen because they're a TCP-level disconnect packet -- there
---  is no client interception point for those. This blocks the common
---  pattern where the SERVER tells the CLIENT "self-disconnect", which
---  many HC-style games use for cheat detection. The toggle is gated
---  via getgenv()._F_ANTIKICK_ACTIVE so multi-script reloads stay safe.
--- ============================================================
 getgenv()._F_ANTIKICK_ACTIVE = getgenv()._F_ANTIKICK_ACTIVE or false
 if hookmetamethod and not getgenv()._F_ANTIKICK_NAMECALL_HOOKED then
     getgenv()._F_ANTIKICK_NAMECALL_HOOKED = true
@@ -2251,8 +2009,6 @@ if hookmetamethod and not getgenv()._F_ANTIKICK_NAMECALL_HOOKED then
             return
         elseif method:sub(1, 8) == "Teleport" then
             -- block teleport calls that include the local player. Server-
-            -- initiated TeleportService:Teleport(placeId, player) is the
-            -- main soft-kick path; we look for our player in args.
             for i = 2, #args do
                 if rawequal(args[i], lplr) then
                     warn("[anti-kick] blocked ", method, "(... local player ...)")
@@ -2283,7 +2039,6 @@ if lplr.Character then watchToolEquip(lplr.Character) end
 
 local _rbLastShot = 0
 -- [Player] = tick() last time we saw them in a knocked state.
--- Cleared on PlayerRemoving. Read by the KnockedGraceDelay guard.
 local _rbLastKnockedAt = {}
 local _rbLastAutoEquipAt = 0  -- throttle: don't try to equip every frame
 plrs.PlayerRemoving:Connect(function(p) _rbLastKnockedAt[p] = nil end)
@@ -2294,7 +2049,6 @@ RunService.Heartbeat:Connect(function()
     if (now - _rbLastShot) < (RageSettings.AutoShootCooldown / 1000) then return end
     local plr = rbGetTarget(); if not plr then return end
     -- HC knocked status: stamp _rbLastKnockedAt every frame the target is
-    -- knocked, and short-circuit if SkipKnocked is on.
     local _hcMod = F.games and F.games.hoodCustoms
     local _isKnockedNow = false
     if _hcMod and _hcMod.isKnocked then
@@ -2306,10 +2060,6 @@ RunService.Heartbeat:Connect(function()
         if RageSettings.SkipKnocked then return end
     end
     -- Post-knocked grace: even when the target now reads alive, if they
-    -- were knocked within the last KnockedGraceDelay ms hold fire. This
-    -- catches the respawn race where the old K.O body is still the
-    -- selected target but the new character isn't replicated yet, so
-    -- shooting wastes ammo.
     if RageSettings.KnockedGraceDelay > 0 then
         local lastK = _rbLastKnockedAt[plr]
         if lastK and (now - lastK) * 1000 < RageSettings.KnockedGraceDelay then return end
@@ -2323,19 +2073,10 @@ RunService.Heartbeat:Connect(function()
     if RageSettings.AutoShootVis and not rbIsVisible(plr) then return end
     if RageSettings.FFCheck and char:FindFirstChildOfClass("ForceField") then return end
     -- Auto-equip on shoot range: if the chosen tool isn't currently held,
-    -- pull it from the backpack via Humanoid:EquipTool. Throttled to 0.2s
-    -- so a missing tool doesn't spam EquipTool every frame.
-    --
-    -- IMPORTANT: only `return` early when we actually need to wait for an
-    -- equip. If the chosen tool is already held, fall through to the
-    -- shoot logic below — otherwise auto-equip mode would silently
-    -- block every shot.
     if RageSettings.AutoShootEquip and RageSettings.AutoShootEquipTool ~= "" then
         local heldTool = lchar:FindFirstChildOfClass("Tool")
         if not heldTool or heldTool.Name ~= RageSettings.AutoShootEquipTool then
             -- Wrong / no tool held: try to equip, then wait a frame
-            -- (watchToolEquip will stamp _rbEquipTime so the EquipDelay
-            -- gate above keeps this loop quiet until the gun is ready).
             if (now - _rbLastAutoEquipAt) > 0.2 then
                 _rbLastAutoEquipAt = now
                 local bp = lplr:FindFirstChild("Backpack")
@@ -2355,9 +2096,6 @@ RunService.Heartbeat:Connect(function()
     end
     _rbLastShot = tick()
     -- HC Force Hit hook: when active, fire the synthetic Shoot remote
-    -- (or click for shotguns) instead of just clicking. forceHit.fire()
-    -- is gated by G.hcForceHitActive and reads ragebot's current target,
-    -- so locking a target with the ragebot is what selects the victim.
     if G.hcForceHitActive
         and F and F.games and F.games.hoodCustoms
         and F.games.hoodCustoms.forceHit
@@ -2369,9 +2107,7 @@ RunService.Heartbeat:Connect(function()
     VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,0)
 end)
 
--- ============================================================
 --  ESP CORE (drawings + render loop)
--- ============================================================
 local EspDrawings, EspHighlights = {}, {}
 local _tracerHistory = {}
 local espRenderConn = nil
@@ -2431,11 +2167,6 @@ local function updateEspForPlayer(plr)
     if not hrp or not hum or hum.Health<=0 then hideEsp(d); return end
     local rootPos,_onScreen=Camera:WorldToViewportPoint(hrp.Position)
     -- Hide only when the player is BEHIND the camera (sp.Z <= 0).
-    -- Previously we hid whenever sp.X/sp.Y fell outside the viewport,
-    -- which made ESP flicker / disappear for players near screen edges
-    -- or close to the camera (head/feet projected off-screen). The
-    -- Drawing API clips off-viewport coords automatically, so it's
-    -- safe to keep drawing with out-of-bounds X/Y.
     if rootPos.Z <= 0 then hideEsp(d); return end
     if EspSettings.TracerHistory then
         if not _tracerHistory[plr] then _tracerHistory[plr]={} end
@@ -2468,10 +2199,6 @@ local function updateEspForPlayer(plr)
     if dist>1000 then hideEsp(d); return end
     local col=espColor(plr)
     -- Compute size from KNOWN body parts only (not GetExtentsSize, which
-    -- includes anything welded to the character - games like HC attach
-    -- map parts / building pieces to player characters, which made the
-    -- ESP box grow huge. Falls back to a sane default if no body parts
-    -- are found yet.
     local _BODY_PARTS_FOR_BOX = {
         "Head","HumanoidRootPart","Torso","UpperTorso","LowerTorso",
         "LeftFoot","RightFoot","LeftHand","RightHand",
@@ -2495,8 +2222,6 @@ local function updateEspForPlayer(plr)
     local topV,_topOn=Camera:WorldToViewportPoint((cf*CFrame.new(0,size.Y/2,0)).Position)
     local botV,_botOn=Camera:WorldToViewportPoint((cf*CFrame.new(0,-size.Y/2,0)).Position)
     -- Same fix as above: only hide when the body's top or bottom is
-    -- BEHIND the camera (Z <= 0). Off-viewport X/Y is fine - let
-    -- the box / lines extend past the screen edge.
     if topV.Z <= 0 or botV.Z <= 0 then hideEsp(d); return end
     local bH=botV.Y-topV.Y; local bW=bH*0.55; local bX=topV.X-bW/2; local bY=topV.Y; local cS=math.max(4,bW*0.22)
 
@@ -2577,7 +2302,6 @@ local function updateEspForPlayer(plr)
             if pA and pB and line then
                 local sA=Camera:WorldToViewportPoint(pA.Position); local sB=Camera:WorldToViewportPoint(pB.Position)
                 -- Only hide when EITHER joint is behind the camera (Z<=0).
-                -- Off-viewport X/Y is fine - Drawing clips automatically.
                 if sA.Z>0 and sB.Z>0 then line.From=Vector2.new(sA.X,sA.Y); line.To=Vector2.new(sB.X,sB.Y); line.Color=col; line.Thickness=1; line.Transparency=1; line.Visible=true
                 else line.Visible=false end
             elseif line then line.Visible=false end
@@ -2601,9 +2325,6 @@ end
 local function startEspRender()
     if espRenderConn or not Drawing then return end
     -- Throttle the ESP render to ~120 Hz max. Caps the cost
-    -- (WorldToViewportPoint per part per player) on 144/240 Hz
-    -- monitors while still being smooth enough that fast-moving
-    -- targets don't visibly lag behind their boxes.
     local MIN_DT = 1 / 120
     local accum = 0
     espRenderConn = RunService.RenderStepped:Connect(function(dt)
@@ -2631,9 +2352,7 @@ end
 
 plrs.PlayerRemoving:Connect(function(plr) removeEspForPlayer(plr) end)
 
--- ============================================================
 --  PUBLIC API
--- ============================================================
 local function makeToggle(startFn, stopFn, isActiveKey)
     return {
         start  = startFn,
@@ -2646,8 +2365,6 @@ end
 F = {}  -- assigns the forward-declared local
 
 -- Version string baked at push time. Use F.getVersion() from the loader
--- to display it in the watermark / on-load notification so you can see
--- at a glance whether the GitHub raw URL served the latest commit.
 F.SCRIPT_VERSION = SCRIPT_VERSION
 F.getVersion = function() return SCRIPT_VERSION end
 
@@ -2657,10 +2374,7 @@ F.fly.getSpeed   = function() return FLY_SPEED end
 
 -- anti-kick: wraps the getgenv flag that the namecall hook reads
 
-
 -- Real Humanoid.WalkSpeed override w/ anti-restore. Setting the value
--- while active applies it instantly; the loop re-asserts whenever the
--- game writes a different value.
 F.walkspeed = {
     start  = startWalkspeed,
     stop   = stopWalkspeed,
@@ -2669,7 +2383,6 @@ F.walkspeed = {
     setValue = function(n)
         G.walkspeedValue = tonumber(n) or G.walkspeedValue
         -- Apply immediately so the slider feels responsive; the Heartbeat
-        -- loop in startWalkspeed will keep re-asserting from now on.
         if G.walkspeedActive then
             local c = lplr.Character
             local hum = c and c:FindFirstChildOfClass("Humanoid")
@@ -2680,7 +2393,6 @@ F.walkspeed = {
 }
 
 -- Real Humanoid.JumpPower override w/ anti-restore. Pair with Force
--- Jump if the game ALSO disables the jump state.
 F.jumpPower = {
     start  = startJumpPower,
     stop   = stopJumpPower,
@@ -2706,7 +2418,6 @@ F.jumpPower = {
 }
 
 -- CFrame-based "speed hack" (camera-WASD-driven HRP nudge).
--- Doesn't touch Humanoid.WalkSpeed - use F.walkspeed for that.
 F.cframeSpeed = {
     start  = function(mult) startCframeSpeed(mult) end,
     stop   = stopCframeSpeed,
@@ -2725,14 +2436,7 @@ F.freecam   = makeToggle(startFreecam,   stopFreecam,   "freecamActive")
 F.zoom      = makeToggle(startZoom,      stopZoom,      "zoomActive")
 F.spin      = makeToggle(startSpin,      stopSpin,      "spinActive")
 
--- ============================================================
 --  CSGO HVH MOVEMENT
---  Always face the camera + jiggle yaw left/right. Same write-
---  HRP.CFrame-at-Last+1 pattern as ragebot FaceTarget so PlayerModule
---  shiftlock and the game's own camera scripts can't undo us
---  mid-frame. AutoRotate is pinned to false while active and restored
---  on stop.
--- ============================================================
 F.hvhMovement = (function()
     local active        = false
     local jiggleAmtMin  = 15   -- random ±degree range, rolled per snap
@@ -2741,9 +2445,6 @@ F.hvhMovement = (function()
     local jiggleHzMax   = 3
     local _savedAR      = nil  -- captured Humanoid.AutoRotate
     -- snap scheduling: per-snap we roll a fresh Hz in [min,max] and
-    -- compute when the next snap should happen. Same for amount -
-    -- each snap picks a fresh magnitude. Keeps both period AND
-    -- swing-distance irregular.
     local _sign         = 1
     local _curAmt       = 0    -- magnitude held since last snap
     local _nextSnapAt   = 0
@@ -2754,9 +2455,9 @@ F.hvhMovement = (function()
         _sign       = (math.random() < 0.5) and -1 or 1
         _curAmt     = (jiggleAmtMin + jiggleAmtMax) * 0.5
         _nextSnapAt = 0
-        RunService:BindToRenderStep("decay_hvh", Enum.RenderPriority.Last.Value + 1, function()
+        RunService:BindToRenderStep("wh_hvh", Enum.RenderPriority.Last.Value + 1, function()
             if not active then
-                RunService:UnbindFromRenderStep("decay_hvh")
+                RunService:UnbindFromRenderStep("wh_hvh")
                 return
             end
             local c = lplr.Character; if not c then return end
@@ -2773,9 +2474,6 @@ F.hvhMovement = (function()
             if dx*dx + dz*dz < 0.01 then return end
             local baseYaw = math.atan2(-dx, -dz)
             -- Snap scheduling: when the planned snap time arrives,
-            -- flip sign and roll a fresh interval (Hz in [min,max])
-            -- AND a fresh amount (deg in [min,max]). Both held until
-            -- the next snap. Each half-cycle = 1/(2*Hz) seconds.
             local now = tick()
             if now >= _nextSnapAt then
                 _sign = -_sign
@@ -2794,7 +2492,7 @@ F.hvhMovement = (function()
 
     local function stop()
         active = false
-        pcall(function() RunService:UnbindFromRenderStep("decay_hvh") end)
+        pcall(function() RunService:UnbindFromRenderStep("wh_hvh") end)
         local c = lplr.Character
         local hum = c and c:FindFirstChildOfClass("Humanoid")
         if hum and _savedAR ~= nil then
@@ -2833,7 +2531,6 @@ end)()
 F.spin.setSpeed = function(n)
     SPIN_SPEED = tonumber(n) or SPIN_SPEED
     -- live-update the running gyro so the slider takes effect immediately
-    -- instead of requiring a toggle off/on
     if G._spinGyro and G._spinGyro.Parent then
         G._spinGyro.AngularVelocity = Vector3.new(0, SPIN_SPEED, 0)
     end
@@ -2843,26 +2540,7 @@ F.tilt      = makeToggle(startTilt,      stopTilt,      "tiltActive")
 F.ice       = makeToggle(startIce,       stopIce,       "iceActive")
 F.ice.setSlide = function(n) ICE_SLIDE = math.clamp(tonumber(n) or ICE_SLIDE, 0, 0.999) end
 
--- ============================================================
 --  STICKY EMOTES  (entire module inlined here)
--- ============================================================
---  Two filters keep us catching ONLY emotes, not weapon/tool anims:
---    1. Tool-ancestor filter - if the source Animation Instance is
---       parented under a Tool (or HopperBin) anywhere up the chain,
---       it's a tool/weapon animation (knife slash, gun fire) and we
---       skip it.
---    2. Builtin filter - Roblox's Animate LocalScript tracks
---       (WalkAnim, RunAnim, IdleAnim, ToolNoneAnim, etc.) are
---       excluded by exact-name + parent-folder + low-priority.
---  Anything that passes both is treated as an emote (catalog OR
---  game-custom). No-stacking via G._stickyTracks - we only ever
---  touch tracks we ourselves captured or spawned.
---
---  Built as an IIFE that returns the {start,stop,toggle,isActive}
---  table directly into F.stickyEmote. None of the helpers leak to
---  the chunk's local register pool - that 200-local limit was hit
---  when these were declared at chunk top level.
--- ============================================================
 F.stickyEmote = (function()
     local BUILTIN_ANIM_NAMES = {
         WalkAnim = true, RunAnim = true, JumpAnim = true, IdleAnim = true,
@@ -3029,11 +2707,6 @@ F.stickyEmote = (function()
         end)
     end
     -- Copy whatever emote `plr` is currently playing onto us, ONCE.
-    -- We do NOT enable the global sticky machinery here (that hooks every
-    -- animation and makes them all loop forever). Whether the copied emote
-    -- survives movement is decided by the "Emotes stay while moving" toggle:
-    --   * toggle ON  -> route through the sticky machinery so it loops
-    --   * toggle OFF -> play it once; it stops when you move (and goes away)
     local function syncWith(plr)
         local ch  = plr and plr.Character
         local hum = ch and ch:FindFirstChildOfClass("Humanoid")
@@ -3078,34 +2751,12 @@ end)()
 
 F.respawn = { fire = cmdRe }
 -- upright teleport (clears ragdoll/sit, faces horizontally, zeroes velocity,
--- syncs desync) -- used by TP shoot / Bring so you don't fall over onto a
--- knocked player
 F.uprightTp = _uprightTp
 F.fov = { set = setFov, get = function() return CUSTOM_FOV end }
 
--- ============================================================
 --  TOOL GLOW
--- ============================================================
---  Highlights the currently equipped Tool with a configurable
---  fill + outline color so it pops visually. Watches both the
---  character (re-wires on respawn) and tool equip / unequip
---  so the highlight follows whatever you're holding.
--- ============================================================
 F.toolMaterial = (function()
-    -- ============================================================
     -- Strip every texture off the equipped tool and force the
-    -- configured Material (Neon / ForceField / etc) in `color`.
-    -- No Highlight - the tool itself glows.
-    --
-    -- Mesh texture sources handled:
-    --   * MeshPart.TextureID           (string property)
-    --   * SpecialMesh.TextureId        (child instance on a Part)
-    --   * Texture / Decal instances    (child instances on any BasePart)
-    --
-    -- Original property values are stashed per-instance so toggling
-    -- off restores the tool exactly (textures back, original material
-    -- + colour). Snap is weak-keyed so dropped tools GC freely.
-    -- ============================================================
     local active     = false
     local color      = Color3.fromRGB(255, 60, 60)
     local transp     = 0.0
@@ -3113,7 +2764,6 @@ F.toolMaterial = (function()
     local equipConn, unequipConn, charConn, descConn, pushLoopThread
 
     -- Per-instance snapshot. Keyed by Instance ref (weak), value is a
-    -- table of the original property values we touched.
     local snap = setmetatable({}, { __mode = "k" })
 
     local function recolourPart(p)
@@ -3149,8 +2799,6 @@ F.toolMaterial = (function()
     end
 
     -- SurfaceAppearance (PBR) sits on a MeshPart and OVERRIDES .Material,
-    -- so the forced Neon/ForceField won't show until it's removed. Detach
-    -- it (remembering its parent) and re-attach on restore.
     local function stripSurface(sa)
         if snap[sa] then return end
         snap[sa] = { kind = "surface", parent = sa.Parent }
@@ -3199,11 +2847,6 @@ F.toolMaterial = (function()
     end
 
     -- Re-push the current material/colour/transparency onto every
-    -- snapped instance. Game scripts (HC's gun handlers etc.) often
-    -- re-set Material / Color / TextureID on equip or on a tick to
-    -- restore the 'intended' look - this loop fires every ~0.4s to
-    -- defeat those overwrites. Now also re-strips meshes + decals so
-    -- a re-shown face / texture goes back to hidden.
     local function pushLiveValues()
         for inst, s in pairs(snap) do
             if inst and inst.Parent then
@@ -3227,8 +2870,6 @@ F.toolMaterial = (function()
     end
 
     -- Catch descendants added AFTER the initial walk - tools spawn
-    -- their accessory meshes / decals asynchronously, so the
-    -- single-shot walkTool on equip misses anything that loads later.
     local function bindDescAdded(tool)
         if descConn then descConn:Disconnect() end
         if not tool then return end
@@ -3263,8 +2904,6 @@ F.toolMaterial = (function()
         end)
         unequipConn = c.ChildRemoved:Connect(function(ch)
             -- Drop unequipped tool's parts from snap so re-equipping a
-            -- different tool re-snapshots cleanly. We don't restore the
-            -- unequipped tool because it's no longer ours to worry about.
             if ch:IsA("Tool") then
                 for _, d in ipairs(ch:GetDescendants()) do snap[d] = nil end
                 snap[ch] = nil
@@ -3303,8 +2942,6 @@ F.toolMaterial = (function()
     end
 
     -- Material setter: accept Enum.Material directly, OR a string
-    -- name (case + space + dot insensitive), OR a Linoria-style
-    -- table from a multi-select dropdown ({"Neon"=true} shape).
     local function setMaterial(m)
         local picked
         if typeof(m) == "EnumItem" and m.EnumType == Enum.Material then
@@ -3333,10 +2970,10 @@ F.toolMaterial = (function()
         end
         if picked then
             material = picked
-            print("[decay] tool material ->", picked.Name,
+            print("[witherhook] tool material ->", picked.Name,
                   active and "(live)" or "(stored - turn toggle on to apply)")
         else
-            warn("[decay] tool material: unknown input", typeof(m), m)
+            warn("[witherhook] tool material: unknown input", typeof(m), m)
         end
         if active then pushLiveValues() end
     end
@@ -3362,14 +2999,7 @@ F.toolMaterial = (function()
     }
 end)()
 
--- ============================================================
 --  BODY MATERIAL
---  Same idea as toolMaterial but walks the whole character
---  (body parts, accessories, head, etc.) instead of the equipped
---  tool. Tool descendants are SKIPPED so toolMaterial can own
---  the equipped weapon without the two features fighting over
---  the snap map.
--- ============================================================
 F.bodyMaterial = (function()
     local active     = false
     local color      = Color3.fromRGB(255, 60, 60)
@@ -3408,8 +3038,6 @@ F.bodyMaterial = (function()
     end
 
     -- Skip everything inside an equipped Tool - that's toolMaterial's
-    -- territory. We walk up to the character root and bail if we
-    -- cross a Tool on the way.
     local function isInsideTool(inst, char)
         local p = inst.Parent
         while p and p ~= char do
@@ -3461,11 +3089,6 @@ F.bodyMaterial = (function()
     end
 
     -- Re-push all our values onto every snapped instance. The game's
-    -- character/accessory scripts re-set Material / Color / face
-    -- decals on a tick to keep the avatar visually intact - this
-    -- loop fires every ~0.4s to defeat those overwrites. Also re-
-    -- strips meshes + decals so a re-added face / shirt goes back
-    -- to hidden.
     local function pushLiveValues()
         for inst, s in pairs(snap) do
             if inst and inst.Parent then
@@ -3489,8 +3112,6 @@ F.bodyMaterial = (function()
     end
 
     -- DescendantAdded catches accessories / shirts / face decals that
-    -- load AFTER walkChar's initial pass. Without this, a hat that
-    -- streams in 200ms after CharacterAdded never gets recoloured.
     local function bindDescAdded(c)
         if descConn then descConn:Disconnect() end
         if not c then return end
@@ -3560,10 +3181,10 @@ F.bodyMaterial = (function()
         end
         if picked then
             material = picked
-            print("[decay] body material ->", picked.Name,
+            print("[witherhook] body material ->", picked.Name,
                   active and "(live)" or "(stored - turn toggle on to apply)")
         else
-            warn("[decay] body material: unknown input", typeof(m), m)
+            warn("[witherhook] body material: unknown input", typeof(m), m)
         end
         if active then pushLiveValues() end
     end
@@ -3589,13 +3210,7 @@ F.bodyMaterial = (function()
     }
 end)()
 
--- ============================================================
 --  ROCKET JUMP
---  Toggle on -> pressing Space triggers an instant velocity blast
---  in (camera lookvector + up) * force. Toggle off -> Space does
---  the normal jump again. fire() can also be called directly for
---  the manual-fire button.
--- ============================================================
 
 -- aimbot
 F.aimbot = {
@@ -3746,7 +3361,6 @@ F.esp = {
     setChamsStyle    = function(s) EspSettings.ChamsStyle    = tostring(s) end,
     setTracerHistLen = function(n) EspSettings.TracerHistLen = math.clamp(tonumber(n) or 2, 0.5, 10) end,
     -- Color setters. Render loop reads EspSettings.* each frame so
-    -- the picker updates take effect immediately - no reset needed.
     setEnemyColor     = function(c) if typeof(c) == "Color3" then EspSettings.EnemyColor    = c end end,
     setTeamColor      = function(c) if typeof(c) == "Color3" then EspSettings.TeamColor     = c end end,
     setNeutralColor   = function(c) if typeof(c) == "Color3" then EspSettings.NeutralColor  = c end end,
@@ -3769,14 +3383,7 @@ F.players = {
     getFollowVisualize = function() return _follow.viz end,
 }
 
--- ============================================================
 --  AUTO-TARGETER
---  Persistent UserId->username list. When the toggle is on, any
---  player in the list who's in the current server (or who joins
---  later) is automatically added to the ragebot's target list.
---  UserId is the persistent key since usernames can change.
---  Stored in `decay_autotarget.json` via writefile/readfile.
--- ============================================================
 
 -- utility helpers (exposed for advanced users)
 F.utils = {
@@ -3813,15 +3420,7 @@ F.utils = {
     getHumanoid  = function() local c=lplr.Character; return c and c:FindFirstChildOfClass("Humanoid") end,
 }
 
--- ============================================================
 --  ANTI-FLING
---  Caps HRP linear+angular velocity each Heartbeat. Real fling
---  exploits push velocities to 1e6+ stud/sec; anything above the
---  cap gets clamped before physics applies it. Default cap is
---  generous (5000 stud/sec) so it doesn't fight fly/speed/blink.
---  Also resets velocity to zero when over the cap, since fling
---  exploits often spike a single frame and then stop.
--- ============================================================
 F.antiFling = (function()
     local cap     = 5000      -- stud/sec, both linear and angular
     local hbConn
@@ -3839,8 +3438,6 @@ F.antiFling = (function()
             pcall(function() hrp.AssemblyAngularVelocity = Vector3.zero end)
         end
         -- some flings target other body parts (Torso, limbs); sweep
-        -- those too. Limited to a few high-mass parts so we don't
-        -- iterate the whole rig every frame.
         for _, name in ipairs({"UpperTorso","LowerTorso","Torso","Head"}) do
             local p = c:FindFirstChild(name)
             if p and p:IsA("BasePart") then
@@ -3879,22 +3476,12 @@ F.antiFling = (function()
     return t
 end)()
 
--- ============================================================
 --  FORCE CHAT  (re-enable chat in games that hid it)
---  Some games disable Roblox's chat via StarterGui:SetCoreGuiEnabled
---  or by setting TextChatService config Enabled = false. We force
---  both back on and re-apply periodically so subsequent script
---  attempts to disable it don't stick.
--- ============================================================
 F.forceChat = (function()
     local StarterGui = game:GetService("StarterGui")
     local TextChatService = game:GetService("TextChatService")
 
     -- Apply chat state. The input box (chatbox) is ALWAYS kept usable; only
-    -- the message window (and bubbles) follow `showWindow`:
-    --   on  -> message window visible  (full chat)
-    --   off -> message window hidden, but you can still type
-    -- Kept re-applied on a loop so the game can't override it.
     local function applyState(showWindow)
         pcall(function()
             StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
@@ -3931,7 +3518,6 @@ F.forceChat = (function()
     end
 
     -- Off hides the message window (where people's messages appear) but keeps
-    -- the chatbox so you can still type.
     local function stop()
         G.forceChatActive = false
         G.forceChatState  = "off"    -- window hidden, chatbox kept
@@ -3949,30 +3535,9 @@ F.forceChat = (function()
     return toggle
 end)()
 
--- ============================================================
 --  PROXIMITY PROMPTS  (3 independent modules)
---    F.prompts.instantActivation  HoldDuration = 0 on every prompt
---    F.prompts.unlimitedRange     MaxActivationDistance = huge,
---                                  RequiresLineOfSight = false
---    F.prompts.autoFire           on PromptShown -> fireproximityprompt
---                                  (requires executor support)
---  Each module independently scans existing prompts on start, hooks
---  workspace.DescendantAdded for future prompts, and disconnects
---  cleanly on stop.
--- ============================================================
 F.prompts = (function()
     -- Each prompt: ONE PropertyChangedSignal per watched property + ONE
-    -- PromptShown for autoFire, installed on first sight. Listeners
-    -- self-gate on G flags, so toggling modules on/off never connects/
-    -- disconnects per-prompt.
-    --
-    -- Anti-restore: when the game writes a property back to default, the
-    -- listener re-applies our value.
-    --
-    -- Originals are stashed as instance attributes the first time we see
-    -- a prompt - so when a module turns OFF we can restore the prompt's
-    -- original HoldDuration / MaxActivationDistance / RequiresLineOfSight
-    -- instead of leaving it stuck on our spoofed value.
 
     local installed = setmetatable({}, { __mode = "k" })
     local ATTR_HOLD = "_F_origHoldDuration"
@@ -3984,8 +3549,6 @@ F.prompts = (function()
         installed[prompt] = true
 
         -- stash originals once. Only write the attribute if it's missing,
-        -- so re-installation across script reloads doesn't overwrite the
-        -- attribute with our already-spoofed value.
         if prompt:GetAttribute(ATTR_HOLD) == nil then
             prompt:SetAttribute(ATTR_HOLD, prompt.HoldDuration)
         end
@@ -4096,18 +3659,10 @@ F.prompts = (function()
     }
 end)()
 
--- ============================================================
 --  SERVER HOPPER
--- ============================================================
 local TeleportService = game:GetService("TeleportService")
 
-
--- ============================================================
 --  DAMAGE DETECTION  ("creator" tag pattern)
---  Watches the local Humanoid for transient ObjectValue children that
---  most Roblox combat scripts parent on hit (creator / DamageSource /
---  Attacker / Killer). Fires registered callbacks with the attacker.
--- ============================================================
 local _damageCallbacks = {}
 
 local function _isDamageTag(name)
@@ -4140,13 +3695,7 @@ end
 if lplr.Character then task.spawn(_watchDamage, lplr.Character) end
 lplr.CharacterAdded:Connect(_watchDamage)
 
-
--- ============================================================
 --  RAGEBOT: TP-SHOOT
---  Saves your CFrame, teleports behind the current locked target,
---  fires one click, then restores the saved CFrame. Distance and
---  return delay are reused from the existing tpBehind config.
--- ============================================================
 F.ragebot.tpShoot = function()
     local target = RageSettings.TargetPlayer
     if not target then return end
@@ -4174,22 +3723,15 @@ F.ragebot.tpShoot = function()
     end)
 
     -- Detect rage-target stomp mode at call time. If on, instead of the
-    -- normal 0.15s restore, hand off to the auto-stomp loop's "wait until
-    -- BodyEffects.Dead" path so we hover on top of the target until the
-    -- stomp finishes the kill, then snap back to the original spot.
     local rageOn = F.games and F.games.hoodCustoms
         and F.games.hoodCustoms.autoStomp
         and F.games.hoodCustoms.autoStomp.getRageTargets
         and F.games.hoodCustoms.autoStomp.getRageTargets()
 
     -- run the wait + restore in a separate coroutine so the keybind handler
-    -- isn't blocked while we wait
     task.spawn(function()
         if rageOn then
             -- wait for the TARGET's BodyEffects.Dead to become true.
-            -- check both plr.Character.BodyEffects.Dead and the workspace
-            -- mirror at workspace.Players.Characters.<name>.BodyEffects.Dead
-            -- (whichever the game uses) - 10s safety cap.
             local deadline = tick() + 10
             local function targetDead()
                 local function isTrue(node)
@@ -4220,18 +3762,14 @@ F.ragebot.tpShoot = function()
     end)
 end
 
--- ============================================================
 --  RAGEBOT: TARGET HUD  (floating panel with avatar/name/hp/tool/dist)
---  Built once, then toggled visible. Hides itself when nothing is
---  locked. Mirrors the pattern from vampireware.lua.
--- ============================================================
 local _rbHud, _rbHudConn, _rbHudFrame, _rbAvatar, _rbName, _rbHpFill, _rbHeld, _rbDist
 local _rbHudLastUid = nil
 
 local function _buildRbHud()
     if _rbHud and _rbHud.Parent then return end
     local sg = Instance.new("ScreenGui")
-    sg.Name = "_decay_rb_hud"
+    sg.Name = "_wh_rb_hud"
     sg.ResetOnSpawn = false
     sg.IgnoreGuiInset = true
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Global
@@ -4368,49 +3906,11 @@ end
 
 F.ragebot.targetGui = makeToggle(startRbTargetGui, stopRbTargetGui, "rbTargetGuiActive")
 
--- ============================================================
 --  AUTO-EQUIP
---  Picks a tool by name and equips it. Optionally auto-equips it
---  on respawn so you never spawn empty-handed.
--- ============================================================
 
--- ============================================================
 --  AUTO WEAPON SWITCH
---  Switches the equipped tool based on distance to the current
---  ragebot target. Three configurable slots:
---    close  : equipped when dist < closeMax
---    medium : equipped when closeMax <= dist < mediumMax
---    long   : equipped when dist >= mediumMax
---  Empty / "(none)" slots are skipped (so leaving 'medium' empty
---  means close-range tool stays equipped until past mediumMax).
---  Cooldown between switches stops oscillation at boundaries.
--- ============================================================
 
-
--- ============================================================
 --  AUTO-REJOIN ON KICK / VOTEKICK
---  Detects the LocalPlayer being kicked (vote, manual, idle, etc.)
---  and replays the loader bootstrap in a fresh server. Generic,
---  not BMS-specific, but the toggle lives in the BMS groupbox
---  since that's where the request came from.
---
---  Caller (loader) wires this up via:
---    F.autoRejoin.setLoaderSrc("loadstring(game:HttpGet(...))()")
---    F.autoRejoin.setOnKick(function() ... save config ... end)
---    F.autoRejoin.setEnabled(true)
---
---  Detection sources (any one trips the rejoin):
---    * Players.PlayerRemoving for LocalPlayer  -> player:Kick()
---    * GuiService.ErrorMessageChanged          -> disconnect prompt
---    * CoreGui RobloxPromptGui ErrorPrompt     -> votekick popup
--- ============================================================
--- ============================================================
---  SHARED TOOLKIT  (exposed to per-game modules in Games/*.lua)
--- ============================================================
---  Per-game logic lives in its own Games/<placeId>.lua now and
---  builds on these. (Hood Customs moved out; ragebot stays here
---  as the shared targeting system it depends on.)
--- ============================================================
 F.games = F.games or {}
 F.util = {
     lplr              = lplr,
@@ -4426,40 +3926,11 @@ F.util = {
     getVisOrigin      = _visGetOrigin,
 }
 
-
--- ============================================================
 --  MOVEMENT: DESYNC  (multiple spoof methods)
---
---  Shared frame pattern:
---    Heartbeat (after physics):  save real HRP state, write a SPOOFED
---                                state. This replicates to the server.
---    BindToRenderStep / First:   restore real HRP state BEFORE the
---                                camera reads it. Locally we render
---                                normally; server gets the spoofed state.
---
---  Modes:
---    "void"        random point in [VOID_MIN, VOID_MAX] stud cube each
---                  Heartbeat. Server can't hit you, you can't shoot
---                  out either (unless voidspam).
---    "voidspam"    same as void, but our outbound Shoot remote fires
---                  unblock the spoof for ~SHOT_SYNC_MS so the shot
---                  processes at the real position. Lets you shoot
---                  while staying server-uninhittable the rest of time.
---    "spin"        rotate HRP wildly each Heartbeat (random Euler).
---                  Position preserved, just the rotation churns.
---                  Confuses server-side aim prediction without a void
---                  jump.
---    "velocity"    keep CFrame, write Vector3.one * 16384 to
---                  AssemblyLinearVelocity. Server thinks we're moving
---                  at impossible speed -> backtrack rejection on
---                  shooters trying to lead us.
--- ============================================================
 F.desync = (function()
     local VOID_MIN     = 5000
     local VOID_MAX     = 20000
     -- Knife Voidspam has its own tighter range so the spoofed
-    -- position stays in a smaller cluster (less server detection
-    -- + easier to reason about). User specified 5k-10k.
     local VOIDSPAM_MIN = 5000
     local VOIDSPAM_MAX = 10000
     local SHOT_SYNC_MS = 100
@@ -4468,17 +3939,10 @@ F.desync = (function()
     -- sky desync: how many studs to shove HRP up server-side (X/Z preserved)
     local SKY_HEIGHT   = 5000
     -- invisible desync: tight-radius void TP. Picks a base void point
-    -- on each spoof, jitters within INVIS_RADIUS studs of it. Result:
-    -- server sees the character clustered in a small area far from
-    -- the real position (so it doesn't render for other players),
-    -- but the cluster is small enough that the server doesn't
-    -- treat the per-tick motion as anti-cheat-worthy "warping".
     local INVIS_BASE_DIST = 1500   -- how far the cluster center is from origin
     local INVIS_RADIUS    = 25     -- jitter radius around the cluster center
 
     -- shared state in getgenv() so the raknet hook (which is installed
-    -- ONCE at module load and survives script re-runs) reads the current
-    -- IIFE's active/mode rather than stale upvalues from an old IIFE.
     getgenv()._F_DESYNC_STATE = getgenv()._F_DESYNC_STATE or { active = false, mode = "off" }
     local SHARED = getgenv()._F_DESYNC_STATE
 
@@ -4500,14 +3964,11 @@ F.desync = (function()
     end
 
     -- compute the spoofed HRP state for the current mode. Caller is
-    -- responsible for capturing realCF/realLV/realAV before this runs.
     local function applySpoof(hrp)
         if mode == "void" then
             hrp.CFrame = CFrame.new(randVoidPos())
         elseif mode == "voidspam" then
             -- Tighter range than regular void (VOIDSPAM_MIN..MAX,
-            -- default 5k-15k). Inline so we don't touch the shared
-            -- randVoidPos() that startVoid uses.
             local function axis()
                 local m = VOIDSPAM_MIN + math.random() * (VOIDSPAM_MAX - VOIDSPAM_MIN)
                 return (math.random() < 0.5) and -m or m
@@ -4515,7 +3976,6 @@ F.desync = (function()
             hrp.CFrame = CFrame.new(Vector3.new(axis(), axis(), axis()))
         elseif mode == "sky" then
             -- preserve XZ + rotation, push Y up by SKY_HEIGHT. server sees
-            -- us floating in the sky directly above our real position.
             local cf = hrp.CFrame
             hrp.CFrame = cf + Vector3.new(0, SKY_HEIGHT, 0)
         elseif mode == "spin" then
@@ -4530,9 +3990,6 @@ F.desync = (function()
             hrp.AssemblyLinearVelocity = Vector3.new(1, 1, 1) * VEL_MAGNITUDE
         elseif mode == "invisible" then
             -- Tight-radius void cluster. Pick the cluster center once
-            -- (a far-away point), then each frame jitter ±INVIS_RADIUS
-            -- around it. Looks like a player standing still at a void
-            -- coordinate from the server's POV.
             if not _invisBase then
                 local function axis()
                     return ((math.random() < 0.5) and -1 or 1) * INVIS_BASE_DIST
@@ -4562,9 +4019,6 @@ F.desync = (function()
             realLV = hrp.AssemblyLinearVelocity
             realAV = hrp.AssemblyAngularVelocity
             -- voidspam: pure void desync (random per-frame position)
-            -- EXCEPT during the MouseButton1 sync window where we skip
-            -- the spoof entirely. syncEnd is written by the input
-            -- listener pinned in getgenv() so it survives script reload.
             if mode == "voidspam" then
                 local ge = getgenv()._F_DESYNC_SYNC_END or 0
                 if tick() < ge then return end
@@ -4589,10 +4043,6 @@ F.desync = (function()
     end
 
     -- raknet desync: hook outbound packet 0x1B (physics replication) and
-    -- corrupt a 4-byte field at offset 1. Resolves raknet lazily because
-    -- some executors expose it after script load, not before. Hook is
-    -- installed at most ONCE per session, gated by SHARED state so the
-    -- IIFE on script reload doesn't stack hooks.
     local function findRaknet()
         local r = rawget(getgenv(), "raknet")
         if r then return r end
@@ -4607,28 +4057,11 @@ F.desync = (function()
         if not r or not r.add_send_hook then return false end
         getgenv()._F_DESYNC_RAKNET_INSTALLED = true
         -- pin the hook function on getgenv so it can't be garbage-collected
-        -- even if the executor's raknet impl doesn't keep a strong ref to it.
-        -- Reads SHARED via the always-fresh getgenv() lookup so state changes
-        -- by the IIFE on script reload are seen immediately.
         getgenv()._F_DESYNC_RAKNET_FN = function(packet)
             local s = getgenv()._F_DESYNC_STATE
             if not s or not s.active or s.mode ~= "raknet" then return end
             if packet.PacketId == 0x1B then
                 -- BLOCK the outbound physics replication packet entirely
-                -- instead of corrupting bytes. The previous version wrote
-                -- 0xFFFFFFFF at offset 1 of packet.AsBuffer which, on
-                -- Potassium, overlapped RakNet's sequence/control bytes
-                -- and made the executor's send queue choke - local
-                -- movement froze because the engine was waiting for acks
-                -- that never came. Blocking is cleaner:
-                --   * server stops receiving position updates -> we appear
-                --     frozen to other players (the desync we want)
-                --   * the rest of the connection (chat, remotes, etc.)
-                --     keeps working because RakNet itself is untouched
-                --   * local engine still updates our HRP each frame so we
-                --     can walk around normally
-                -- Try every block API we know about; return false is the
-                -- convention most executors use.
                 pcall(function() packet:SetCanBeSent(false) end)
                 pcall(function() packet:Drop() end)
                 pcall(function() packet:Block() end)
@@ -4643,12 +4076,6 @@ F.desync = (function()
     end
 
     -- watchdog: re-asserts SHARED.active state every 1s AND re-installs the
-    -- raknet hook every 10s. Potassium's raknet hooks have been observed to
-    -- expire / get cleared after a while - re-calling add_send_hook with our
-    -- pinned function refreshes the registration. If the executor dedupes
-    -- by fn ref it's a no-op; if it stacks, the duplicate hooks all do the
-    -- same idempotent write (write 0xFFFFFFFF at offset 1) so output is
-    -- unchanged. The 10s cadence is slow enough to avoid runaway stacking.
     if not getgenv()._F_DESYNC_RAKNET_WATCHDOG then
         getgenv()._F_DESYNC_RAKNET_WATCHDOG = true
         task.spawn(function()
@@ -4679,35 +4106,12 @@ F.desync = (function()
     end
 
     -- voidspam: pure input-based trigger. On MouseButton1 down, set
-    -- syncEnd so the Heartbeat skips the spoof for SHOT_SYNC_MS ms.
-    -- No namecall hook, no synchronous HRP.CFrame writes per shot -
-    -- the previous version did a write inside the namecall closure on
-    -- every Shoot fire, which stalled / crashed the engine when
-    -- ForceHit's autoshoot fired many shots per second.
-    --
-    -- Trigger: knife SWING ANIMATION (not MouseButton1). Click-based
-    -- triggering doesn't account for ping - the actual server-side
-    -- hit registration lines up with the swing animation playing,
-    -- which already includes the round-trip latency.
-    --
-    -- Sync window is a sub-range of the swing animation:
-    --   off-from  = anim_start + (START_FRAC * length)
-    --   off-until = anim_start + (END_FRAC   * length)
-    --
-    --   START_FRAC = _F_DESYNC_SHOT_DELAY_MS / 100  (% of anim,
-    --                "Start at % of anim" slider, default 40)
-    --   END_FRAC   = _F_DESYNC_SHOT_SYNC_MS  / 100  (% of anim,
-    --                "End at % of anim"   slider, default 90)
-    --
-    -- Example: anim length 0.5s, start 40%, end 90%
-    --   off from t=0.20s to t=0.45s (relative to anim start)
     local KNIFE_SWING_ANIM_ID = "rbxassetid://15862130681"
 
     local function _voidspamArmFromAnim(track)
         local L = track.Length
         if not L or L <= 0 then
             -- Length isn't published yet (e.g., first play). Fall
-            -- back to assuming a 0.5s anim.
             L = 0.5
         end
         local startFrac = (getgenv()._F_DESYNC_SHOT_DELAY_MS or 40) / 100
@@ -4724,8 +4128,6 @@ F.desync = (function()
             if not s2 or not s2.active or s2.mode ~= "voidspam" then return end
             local endTime = tick() + hold
             -- extend SYNC_END if the new end is later; never shrink
-            -- (so overlapping swings don't accidentally close the
-            -- window early)
             if endTime > (getgenv()._F_DESYNC_SYNC_END or 0) then
                 getgenv()._F_DESYNC_SYNC_END = endTime
             end
@@ -4758,24 +4160,10 @@ F.desync = (function()
         lplr.CharacterAdded:Connect(hookChar)
     end
     -- mirror SHOT_SYNC_MS into getgenv so the input listener (which is
-    -- pinned across reloads) sees the current value
     getgenv()._F_DESYNC_SHOT_SYNC_MS  = SHOT_SYNC_MS
     getgenv()._F_DESYNC_SHOT_DELAY_MS = getgenv()._F_DESYNC_SHOT_DELAY_MS or 40
 
-    -- ============================================================
     --  Server-position marker (lightweight)
-    -- ============================================================
-    --  Same approach as F.pulseLagswitch's visualizer: ONE Part + ONE
-    --  Highlight. No character clone, no Animator, no particles, no
-    --  Model. The previous "ghost" - a full :Clone() of the character
-    --  with attachments, particle emitters, animated rings, and a
-    --  per-frame VFX loop - froze the client for hundreds of ms on
-    --  low-end devices and tripped some games' anti-cheat that scans
-    --  for new player-shaped Models. This version doesn't.
-    --
-    --  Made noticeable via: bright cyan neon Part + Highlight visible
-    --  through walls + slow transparency pulse driven by tick().
-    -- ============================================================
     local ghostPart, ghostHighlight, ghostVfxConn
 
     local function ghostRemove()
@@ -4812,7 +4200,6 @@ F.desync = (function()
         ghostHighlight.Parent              = ghostPart
 
         -- slow pulse so it's clearly visible without flashing.
-        -- Cheap: just sin(tick()) -> transparency on one Part / one Highlight.
         ghostVfxConn = RunService.RenderStepped:Connect(function()
             if not ghostPart or not ghostPart.Parent then return end
             local t = tick() * 4
@@ -4828,13 +4215,11 @@ F.desync = (function()
         SHARED.active = true
         SHARED.mode   = newMode
         -- watchdog flag: tells the periodic re-asserter to keep SHARED in
-        -- the raknet state. Cleared on stop or non-raknet mode switch.
         getgenv()._F_DESYNC_RAKNET_WANTED = (newMode == "raknet")
         if newMode == "raknet" then
             if hbConn then hbConn:Disconnect(); hbConn = nil end
             pcall(function() RunService:UnbindFromRenderStep(RESTORE_BIND) end)
             -- build the ghost at the current HRP position so the user
-            -- can see where the server thinks they are
             local c = lplr.Character
             local hrp = c and c:FindFirstChild("HumanoidRootPart")
             if hrp then ghostCreate(hrp.Position) end
@@ -4854,12 +4239,6 @@ F.desync = (function()
         -- always remove the ghost on any stop (cheap if it doesn't exist)
         ghostRemove()
         -- We intentionally DO NOT call r.remove_send_hook here. The hook
-        -- function early-returns when SHARED.active is false or mode is
-        -- not "raknet", so leaving it registered is harmless. Removing
-        -- it left _F_DESYNC_RAKNET_INSTALLED == true, so the next
-        -- ensureRaknetHook() call skipped re-install and we'd wait up
-        -- to 10s for the watchdog re-installer to put it back. That's
-        -- the "takes a while to turn on again" lag the user reported.
         if hbConn then hbConn:Disconnect(); hbConn = nil end
         pcall(function() RunService:UnbindFromRenderStep(RESTORE_BIND) end)
         local c = lplr.Character
@@ -4875,13 +4254,7 @@ F.desync = (function()
         mode = "off"
     end
 
-    -- ============================================================
     --  Sync window visualizer
-    --  When the void spoof is OFF (i.e., tick() < SYNC_END), render
-    --  a "VULNERABLE" banner at the top-center of the screen so the
-    --  user can see at a glance when they're hittable.
-    --  Pure Drawing API - one Text + one filled Square, no GUI.
-    -- ============================================================
     local syncVisualEnabled = false
     local syncVisualText, syncVisualBg, syncVisualConn
 
@@ -4938,7 +4311,6 @@ F.desync = (function()
 
     return {
         -- mode starters - mutually exclusive (calling one auto-stops any
-        -- previous mode by re-binding the same Heartbeat)
         startVoid       = function() startMode("void") end,
         startVoidspam   = function() startMode("voidspam") end,
         startSky        = function() startMode("sky") end,
@@ -4962,26 +4334,16 @@ F.desync = (function()
             VOID_MAX = math.max(VOID_MIN + 1, tonumber(maxV) or VOID_MAX)
         end,
         -- Invisible-mode jitter radius (studs) around the cluster
-        -- center. Smaller = tighter, less "warping" perceived by
-        -- server anti-cheat; larger = more chaotic position.
         setInvisibleRadius = function(n)
             INVIS_RADIUS = math.clamp(tonumber(n) or 25, 0, 500)
         end,
         getInvisibleRadius = function() return INVIS_RADIUS end,
         -- Now interpreted as "End at % of anim" - the percentage
-        -- of the swing animation where the spoof-off window closes.
         setShotSyncMs   = function(n)
             SHOT_SYNC_MS = math.clamp(tonumber(n) or 90, 0, 100)
             getgenv()._F_DESYNC_SHOT_SYNC_MS = SHOT_SYNC_MS
         end,
         -- Delay between MouseButton1 click and when the void spoof
-        -- actually turns off (sync window begins). 0 = immediate
-        -- (original behavior). Higher values let the user fire
-        -- while still spoofed, then drop to real position after N ms.
-        -- Now interpreted as "start at % of anim" - what fraction
-        -- of the swing animation has played before the spoof goes
-        -- off. 40 = spoof off starts at 40% of the swing.
-        -- (Slider value is 0-100, used as a percent.)
         setShotDelayMs  = function(n)
             local v = math.clamp(tonumber(n) or 40, 0, 100)
             getgenv()._F_DESYNC_SHOT_DELAY_MS = v
@@ -4990,8 +4352,6 @@ F.desync = (function()
             return getgenv()._F_DESYNC_SHOT_DELAY_MS or 0
         end,
         -- Sync window visualizer: shows a "VULNERABLE" banner at the
-        -- top of the screen while the void spoof is currently off
-        -- (i.e., tick() < SYNC_END). Pure Drawing API, no GUI.
         setSyncVisualEnabled = function(v)
             syncVisualEnabled = v == true
             if syncVisualEnabled then syncVisualCreate() else syncVisualRemove() end
@@ -5007,9 +4367,6 @@ F.desync = (function()
             SKY_HEIGHT = math.clamp(tonumber(n) or 5000, 50, 100000)
         end,
         -- called by external TP code (_uprightTp etc) so our captured
-        -- realCF reflects the new position. without this our next
-        -- RenderStepped restore would yank HRP back to where it was
-        -- before the user's teleport.
         notifyTeleport  = function(newCF)
             if typeof(newCF) == "CFrame" then
                 realCF = newCF
@@ -5022,25 +4379,7 @@ F.desync = (function()
     }
 end)()
 
--- ============================================================
 --  SERVER POSITION TRACKER (RakNet)
--- ============================================================
---  Reads where the SERVER currently thinks we are, via a RakNet
---  *observer* send-hook on the physics-replication packet (0x1B).
---  It never blocks - it only watches. Every time a 0x1B is allowed
---  to flow, the server is receiving our current HRP, so we record
---  HRP.CFrame as the server position. While something is BLOCKING
---  0x1B (e.g. F.desync raknet/invisible, F.pulseLagswitch during an
---  off-phase) we stop recording, so the stored CFrame stays frozen
---  at the last position the server actually received - which is
---  exactly where the server thinks we are. With no spoof active it
---  just tracks our real position (server == client).
---
---  This makes the value GENERAL: any block/drop-style position spoof
---  is reflected, not just one desync mode. (Byte-rewriting spoofs
---  would need packet parsing; witherhook's spoofs all block, so
---  recording HRP-at-send-time is exact.)
--- ============================================================
 F.serverPos = (function()
     local function findRaknet()
         local r = rawget(getgenv(), "raknet")
@@ -5051,8 +4390,6 @@ F.serverPos = (function()
     end
 
     -- Is some hook currently suppressing outbound 0x1B physics packets?
-    -- Mirrors the shared state the desync / lagswitch publish so we know
-    -- when NOT to advance the recorded server position.
     local function isBlocking()
         local d = getgenv()._F_DESYNC_STATE
         if d and d.active and (d.mode == "raknet" or d.mode == "invisible") then
@@ -5084,47 +4421,17 @@ F.serverPos = (function()
         start       = function() return ensureHook() end,
         isAvailable = function() return findRaknet() ~= nil end,
         -- last position the server received; nil until a 0x1B is seen.
-        -- Callers should fall back to the live HRP if this is nil.
         getCFrame   = function() return getgenv()._F_SERVERPOS_CF end,
     }
 end)()
 
--- ============================================================
 --  PULSE LAGSWITCH
--- ============================================================
---  Selectively blocks outgoing PHYSICS REPLICATION packets
---  (PacketId 0x1B) on a configurable on/off duty cycle. Only
---  character position/velocity is affected - chat, RemoteEvents,
---  Shoot fires, hit registrations, etc. all pass through normally.
---
---  Server sees your position in stuttered bursts (e.g. on 200ms,
---  off 100ms): from its POV you're frozen for 200ms, jump to the
---  new position, frozen again, jump, etc. Combined with movement,
---  this makes you nearly impossible to track for human shooters
---  and silent-aim alike.
---
---  Installs its OWN raknet send_hook independent of F.desync's, so
---  the two can coexist (though combining is weird). Hook is pinned
---  in getgenv so script reload doesn't double-stack.
--- ============================================================
 
--- ============================================================
 --  WHITELIST  (global, all-features-aware)
--- ============================================================
---  Lookup tested by:
---    * Ragebot targeting (rbGetTarget + rbLockClosest skip
---      whitelisted players entirely)
---    * MM2 shootMurderer + triggerMurderer (skip whitelisted)
---
---  Case-insensitive. Matches by both Name and DisplayName so a user
---  can whitelist either. Stored on getgenv so script reloads keep
---  the list within a session.
--- ============================================================
 F.whitelist = (function()
     getgenv()._F_WHITELIST = getgenv()._F_WHITELIST or {}
     local store = getgenv()._F_WHITELIST  -- map: actualName -> true
     -- Rebuild lowercase index from store (in case getgenv survived
-    -- a reload).
     local lower = {}
     for n in pairs(store) do lower[n:lower()] = n end
 
@@ -5180,7 +4487,6 @@ F.whitelist = (function()
         clear    = clear,
     }
 end)()
-
 
 -- bulk teardown (call this when your GUI closes)
 F.disableAll = function()
