@@ -17,6 +17,739 @@ local regToggle, regSlider, regDropdown = api.regToggle, api.regSlider, api.regD
 local regColor, regDecimal = api.regColor, api.regDecimal
 
 -- ============================================================
+--  RAGEBOT  (HC multi-target system; moved from functions.lua)
+--  Registers hook.ragebot; runs BEFORE the HC backend so its
+--  getTarget is available to the knife bot / forceHit rebind.
+-- ============================================================
+do
+    local lplr                = hook.util.lplr
+    local plrs                = hook.util.players
+    local RunService          = hook.util.runService
+    local UserInputService    = hook.util.uis
+    local VirtualInputManager = hook.util.vim
+    local makeToggle          = hook.util.makeToggle
+    local G                   = hook.util.state
+    local isReallyVisible     = hook.util.visibleCheck
+    local _visGetOrigin       = hook.util.getVisOrigin
+    local _uprightTp          = hook.uprightTp
+
+local RageSettings = {
+    TargetUserId=nil, TargetPlayer=nil, SkipKnocked=false, IgnoreKnocked=false,
+    ShowLine=true, ShowOutline=true, LineOrigin="Bottom", FaceTarget=false,
+    OutlineColor = Color3.fromRGB(255, 80, 80),
+    LineColor    = Color3.fromRGB(255, 60, 60),
+    Orbit=false, OrbitDistance=15, OrbitSpeed=60, OrbitHeight=5,
+    AutoShoot=false, AutoShootDist=50, AutoShootVis=true, AutoShootRequireTool=false,
+    AutoShootCooldown=100, EquipDelay=0.5, FFCheck=true,
+    -- when on, equip AutoShootEquipTool (from backpack) the moment
+    AutoShootEquip=false, AutoShootEquipTool="",
+    -- post-knocked grace window (ms). If the target was seen knocked
+    KnockedGraceDelay=0,
+    SilentForce=false, SilentMethod="All",
+    SpeedPanic=false, SpeedPanicVal=0,
+    TpBehind=false, TpBehindDist=0,
+    CamSnap=false, CamSmoothing=0.15,
+    AutoSwitch=true, NotifyTarget=true,
+    SwitchByMouse=false,
+    -- Priority mode for rbGetTarget. One of:
+    Priority="Closest",
+}
+local _rbTargetList = {}
+--  RAGEBOT CORE
+local _rbMousePos = UserInputService:GetMouseLocation()
+UserInputService.InputChanged:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseMovement then
+        _rbMousePos = UserInputService:GetMouseLocation()
+    end
+end)
+
+local rbCachedTarget = nil
+local _rbFaceStepBound = false
+-- Snapshot of Humanoid.AutoRotate before we forced it off lives on G
+local rbOrbitAngle = 0
+
+-- target visualization
+local RB_targetLine, RB_outlineHL
+if Drawing and Drawing.new then
+    RB_targetLine = Drawing.new("Line")
+    RB_targetLine.Visible     = false
+    RB_targetLine.Thickness   = 2
+    RB_targetLine.Color       = Color3.fromRGB(255, 80, 80)
+    RB_targetLine.Transparency= 1
+end
+local function ensureRBHighlight()
+    if RB_outlineHL and RB_outlineHL.Parent then return RB_outlineHL end
+    RB_outlineHL = Instance.new("Highlight")
+    RB_outlineHL.Name = "_wh_rb_outline"
+    RB_outlineHL.FillTransparency    = 1
+    RB_outlineHL.OutlineColor        = Color3.fromRGB(255, 80, 80)
+    RB_outlineHL.OutlineTransparency = 0
+    RB_outlineHL.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    RB_outlineHL.Enabled             = false
+    pcall(function() RB_outlineHL.Parent = game:GetService("CoreGui") end)
+    if not RB_outlineHL.Parent then RB_outlineHL.Parent = workspace end
+    return RB_outlineHL
+end
+
+local function rbIsVisible(plr)
+    local char = plr.Character; local lchar = lplr.Character
+    if not char or not lchar then return false end
+    local root = char:FindFirstChild("HumanoidRootPart"); if not root then return false end
+    local camPos = _visGetOrigin()
+    local ignore = {lchar, char}
+    for _, p in ipairs(plrs:GetPlayers()) do
+        if p.Character and p.Character ~= char and p.Character ~= lchar then table.insert(ignore, p.Character) end
+    end
+    return isReallyVisible(camPos, root.Position, ignore)
+end
+
+-- Returns true if the target should be completely skipped from selection
+local function rbIgnoreByKnocked(plr)
+    if not RageSettings.IgnoreKnocked then return false end
+    local hc = hook and hook.games and hook.games.hoodCustoms
+    if not hc or not hc.isKnocked then return false end
+    local ok, knocked = pcall(hc.isKnocked, plr)
+    return ok and knocked
+end
+
+-- score a candidate target for a priority mode. lower = better.
+local function rbScoreTarget(plr, char, hrp, hum, lhrp, cam, mousePos, camPos, camLook)
+    local mode = RageSettings.Priority or "Closest"
+    if RageSettings.SwitchByMouse and mode == "Closest" then mode = "Mouse" end
+    if mode == "Mouse" then
+        local sp, onScreen = cam:WorldToViewportPoint(hrp.Position)
+        if not onScreen then return math.huge end
+        return (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
+    elseif mode == "workspace.CurrentCamera" then
+        local toTarget = (hrp.Position - camPos).Unit
+        local dotV = toTarget:Dot(camLook)
+        if dotV <= 0 then return math.huge end  -- behind us
+        return 1 - dotV  -- closer to 0 = more directly in front
+    elseif mode == "LowestHP" then
+        return hum.Health
+    elseif mode == "HighestThreat" then
+        -- threat = closeness + tool drawn. lower distance + tool out = best.
+        local d = lhrp and (lhrp.Position - hrp.Position).Magnitude or math.huge
+        local hasTool = char:FindFirstChildOfClass("Tool") ~= nil
+        return d + (hasTool and 0 or 1000)
+    end
+    -- Closest (default fallback)
+    return lhrp and (lhrp.Position - hrp.Position).Magnitude or math.huge
+end
+
+local function rbGetTarget()
+    if #_rbTargetList > 0 then
+        local lchar=lplr.Character
+        local lhrp=lchar and lchar:FindFirstChild("HumanoidRootPart")
+        local cam = workspace.CurrentCamera
+        local mousePos = UserInputService:GetMouseLocation()
+        local camCF = cam.CFrame
+        local camPos, camLook = camCF.Position, camCF.LookVector
+        local best, bestScore = nil, math.huge
+        for _,entry in ipairs(_rbTargetList) do
+            if not entry.plr or not entry.plr.Parent then
+                for _,p in ipairs(plrs:GetPlayers()) do
+                    if p.UserId==entry.userId then entry.plr=p; break end
+                end
+            end
+            local plr=entry.plr; if not plr or not plr.Parent then continue end
+            if hook.whitelist and hook.whitelist.contains(plr) then continue end  -- skip whitelisted players
+            local char=plr.Character; local hrp=char and char:FindFirstChild("HumanoidRootPart")
+            if not hrp then continue end
+            local hum=char:FindFirstChildOfClass("Humanoid"); if not hum or hum.Health<=0 then continue end
+            if rbIgnoreByKnocked(plr) then continue end
+            local score = rbScoreTarget(plr, char, hrp, hum, lhrp, cam, mousePos, camPos, camLook)
+            if score < bestScore then bestScore = score; best = plr end
+        end
+        if best then RageSettings.TargetPlayer=best; RageSettings.TargetUserId=best.UserId; return best end
+    end
+    local uid=RageSettings.TargetUserId; if not uid then return nil end
+    local plr=RageSettings.TargetPlayer
+    if plr and plr.Parent and plr.UserId==uid then
+        if rbIgnoreByKnocked(plr) then return nil end
+        return plr
+    end
+    for _,p in ipairs(plrs:GetPlayers()) do
+        if p.UserId==uid then
+            if hook.whitelist and hook.whitelist.contains(p) then return nil end
+            if rbIgnoreByKnocked(p) then return nil end
+            RageSettings.TargetPlayer=p; return p
+        end
+    end
+    return nil
+end
+
+-- expose lockClosest / unlock / tpBehind / etc.
+local function rbLockClosest()
+    local cam = workspace.CurrentCamera
+    local mousePos = UserInputService:GetMouseLocation()
+    local best, bestDist = nil, math.huge
+    for _, plr in ipairs(plrs:GetPlayers()) do
+        if plr == lplr then continue end
+        if hook.whitelist and hook.whitelist.contains(plr) then continue end
+        local char = plr.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then continue end
+        local sp, onScreen = cam:WorldToViewportPoint(hrp.Position)
+        if not onScreen then continue end
+        local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
+        if d < bestDist then bestDist = d; best = plr end
+    end
+    if best then
+        _rbTargetList = {{userId=best.UserId, plr=best}}
+        RageSettings.TargetPlayer = best
+        RageSettings.TargetUserId = best.UserId
+    end
+    return best
+end
+local function rbLockByPlayer(plr)
+    if typeof(plr)=="string" then plr=findPlayerByName(plr) end
+    if not plr then return nil end
+    _rbTargetList = {{userId=plr.UserId, plr=plr}}
+    RageSettings.TargetPlayer = plr
+    RageSettings.TargetUserId = plr.UserId
+    return plr
+end
+local function rbAddTarget(plr)
+    if typeof(plr)=="string" then plr=findPlayerByName(plr) end
+    if not plr then return end
+    for _,e in ipairs(_rbTargetList) do if e.userId==plr.UserId then return end end
+    table.insert(_rbTargetList, {userId=plr.UserId, plr=plr})
+end
+local function rbUnlock()
+    _rbTargetList = {}
+    RageSettings.TargetPlayer = nil
+    RageSettings.TargetUserId = nil
+end
+local function rbTpBehind()
+    local plr = RageSettings.TargetPlayer; if not plr then return end
+    local char = plr.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local lchar = lplr.Character
+    local lhrp = lchar and lchar:FindFirstChild("HumanoidRootPart")
+    if not lhrp then return end
+
+    -- direction the target is facing, projected horizontal
+    local lv = hrp.CFrame.LookVector
+    local horiz = Vector3.new(lv.X, 0, lv.Z)
+    if horiz.Magnitude < 0.01 then horiz = Vector3.new(0, 0, -1) end
+    horiz = horiz.Unit
+
+    -- TpBehindDist=0 (default) puts us inside the target's HRP, larger values
+    local position = hrp.Position - horiz * (RageSettings.TpBehindDist or 0)
+    _uprightTp(lchar, lhrp, position, horiz)
+end
+
+-- ragebot per-frame: face target / orbit / cam snap / speed panic
+RunService.RenderStepped:Connect(function(dt)
+    -- early-out when nothing is asking for ragebot work - skips the
+    if not RageSettings.SilentForce
+        and not RageSettings.AutoShoot
+        and not RageSettings.ShowLine
+        and not RageSettings.ShowOutline
+        and not RageSettings.CamSnap
+        and not RageSettings.FaceTarget
+        and not RageSettings.SpeedPanic
+        and not RageSettings.TargetPlayer
+        and (not _rbTargetList or #_rbTargetList == 0)
+    then
+        if RB_targetLine then RB_targetLine.Visible = false end
+        if RB_outlineHL  then RB_outlineHL.Enabled  = false end
+        rbCachedTarget = nil
+        return
+    end
+    local plr = rbGetTarget()
+    local char = plr and plr.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    rbCachedTarget = hrp
+
+    -- target line origin: Bottom / Center / Top / Mouse
+    if RB_targetLine then
+        local function isFinite(n) return type(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge end
+
+        local cam = hrp and workspace.CurrentCamera
+        local pos = hrp and hrp.Position
+        local validPos = pos and isFinite(pos.X) and isFinite(pos.Y) and isFinite(pos.Z)
+
+        if RageSettings.ShowLine and hrp and validPos and cam then
+            local sp = cam:WorldToViewportPoint(pos)
+            local vs = cam.ViewportSize
+            local toX, toY = sp.X, sp.Y
+
+            -- if behind camera, mirror across screen center and push outward
+            if sp.Z < 0 then
+                local cx, cy = vs.X * 0.5, vs.Y * 0.5
+                toX = cx + (cx - toX) * 4
+                toY = cy + (cy - toY) * 4
+            end
+
+            -- if anything went non-finite during projection, hide instead of
+            if not (isFinite(toX) and isFinite(toY)) then
+                RB_targetLine.Visible = false
+            else
+                local origin = RageSettings.LineOrigin
+                local from
+                if origin == "Top" then
+                    from = Vector2.new(vs.X * 0.5, 0)
+                elseif origin == "Center" then
+                    from = Vector2.new(vs.X * 0.5, vs.Y * 0.5)
+                elseif origin == "Mouse" then
+                    from = UserInputService:GetMouseLocation()
+                else
+                    from = Vector2.new(vs.X * 0.5, vs.Y)
+                end
+                RB_targetLine.From = from
+                RB_targetLine.To   = Vector2.new(toX, toY)
+                RB_targetLine.Color = RageSettings.LineColor or Color3.fromRGB(255, 80, 80)
+                RB_targetLine.Visible = true
+            end
+        else
+            RB_targetLine.Visible = false
+        end
+    end
+
+    -- target outline: highlight on the locked character
+    if RageSettings.ShowOutline and char then
+        local hl = ensureRBHighlight()
+        if hl.Adornee ~= char then hl.Adornee = char end
+        hl.OutlineColor = RageSettings.OutlineColor or Color3.fromRGB(255, 80, 80)
+        hl.Enabled = true
+    elseif RB_outlineHL then
+        RB_outlineHL.Enabled = false
+    end
+
+    if RageSettings.CamSnap and hrp then
+        local cam = workspace.CurrentCamera
+        local desired = CFrame.new(cam.CFrame.Position, hrp.Position)
+        local alpha = math.clamp(1-(RageSettings.CamSmoothing^(dt*60)),0,1)
+        cam.CFrame = cam.CFrame:Lerp(desired, alpha)
+    end
+
+    local lc = lplr.Character
+    local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+    if RageSettings.FaceTarget and hrp and lhrp then
+        if not _rbFaceStepBound then
+            _rbFaceStepBound = true
+            -- Bind at Last+1 so we run AFTER everything:
+            RunService:BindToRenderStep("rbFaceStep", Enum.RenderPriority.Last.Value+1, function()
+                if not RageSettings.FaceTarget then
+                    RunService:UnbindFromRenderStep("rbFaceStep")
+                    _rbFaceStepBound = false
+                    -- restore the AutoRotate we forced off below
+                    local c   = lplr.Character
+                    local hum = c and c:FindFirstChildOfClass("Humanoid")
+                    if hum and G._rbFaceSavedAutoRotate ~= nil then
+                        pcall(function() hum.AutoRotate = G._rbFaceSavedAutoRotate end)
+                    end
+                    G._rbFaceSavedAutoRotate = nil
+                    return
+                end
+                local char2=lplr.Character; if not char2 then return end
+                local lhrp2=char2:FindFirstChild("HumanoidRootPart"); if not lhrp2 then return end
+                -- Pin AutoRotate=false so the engine doesn't rotate the
+                local hum = char2:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    if G._rbFaceSavedAutoRotate == nil then
+                        G._rbFaceSavedAutoRotate = hum.AutoRotate
+                    end
+                    if hum.AutoRotate then
+                        pcall(function() hum.AutoRotate = false end)
+                    end
+                end
+                local tplr=RageSettings.TargetPlayer; if not tplr then return end
+                local tchar=tplr.Character; if not tchar then return end
+                local thrp=tchar:FindFirstChild("HumanoidRootPart"); if not thrp then return end
+                local dir=(thrp.Position-lhrp2.Position)*Vector3.new(1,0,1)
+                if dir.Magnitude<0.1 then return end
+                local yaw=math.atan2(-dir.X,-dir.Z)
+                lhrp2.CFrame=CFrame.new(lhrp2.Position)*CFrame.fromEulerAnglesYXZ(0,yaw,0)
+            end)
+        end
+    elseif lhrp then
+        if _rbFaceStepBound then
+            RunService:UnbindFromRenderStep("rbFaceStep")
+            _rbFaceStepBound=false
+            -- restore AutoRotate when face-target toggles off via the outer
+            local hum = lc:FindFirstChildOfClass("Humanoid")
+            if hum and G._rbFaceSavedAutoRotate ~= nil then
+                pcall(function() hum.AutoRotate = G._rbFaceSavedAutoRotate end)
+            end
+            G._rbFaceSavedAutoRotate = nil
+        end
+    end
+
+    if RageSettings.SpeedPanic and char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed=0; hum.JumpPower=0 end
+    end
+
+    if RageSettings.Orbit and hrp then
+        if lhrp then
+            rbOrbitAngle = (rbOrbitAngle + RageSettings.OrbitSpeed * dt) % 360
+            local rad = math.rad(rbOrbitAngle); local d = RageSettings.OrbitDistance
+            local targetPos = hrp.Position + Vector3.new(math.cos(rad)*d, RageSettings.OrbitHeight, math.sin(rad)*d)
+            lhrp.CFrame = CFrame.new(targetPos, hrp.Position)
+        end
+    end
+end)
+
+
+
+-- ragebot auto-shoot
+local _rbEquipTime = 0
+local function watchToolEquip(char)
+    if not char then return end
+    char.ChildAdded:Connect(function(c) if c:IsA("Tool") then _rbEquipTime = tick() end end)
+end
+lplr.CharacterAdded:Connect(watchToolEquip)
+if lplr.Character then watchToolEquip(lplr.Character) end
+
+local _rbLastShot = 0
+-- [Player] = tick() last time we saw them in a knocked state.
+local _rbLastKnockedAt = {}
+local _rbLastAutoEquipAt = 0  -- throttle: don't try to equip every frame
+plrs.PlayerRemoving:Connect(function(p) _rbLastKnockedAt[p] = nil end)
+RunService.Heartbeat:Connect(function()
+    if not RageSettings.AutoShoot then return end
+    local now = tick()
+    if (now - _rbEquipTime) < RageSettings.EquipDelay then return end
+    if (now - _rbLastShot) < (RageSettings.AutoShootCooldown / 1000) then return end
+    local plr = rbGetTarget(); if not plr then return end
+    -- HC knocked status: stamp _rbLastKnockedAt every frame the target is
+    local _hcMod = hook.games and hook.games.hoodCustoms
+    local _isKnockedNow = false
+    if _hcMod and _hcMod.isKnocked then
+        local okK, knocked = pcall(_hcMod.isKnocked, plr)
+        _isKnockedNow = okK and knocked or false
+    end
+    if _isKnockedNow then
+        _rbLastKnockedAt[plr] = now
+        if RageSettings.SkipKnocked then return end
+    end
+    -- Post-knocked grace: even when the target now reads alive, if they
+    if RageSettings.KnockedGraceDelay > 0 then
+        local lastK = _rbLastKnockedAt[plr]
+        if lastK and (now - lastK) * 1000 < RageSettings.KnockedGraceDelay then return end
+    end
+    local char = plr.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+    local lchar = lplr.Character
+    local lhrp = lchar and lchar:FindFirstChild("HumanoidRootPart"); if not lhrp then return end
+    local dist = (lhrp.Position - hrp.Position).Magnitude
+    if dist > RageSettings.AutoShootDist then return end
+    if RageSettings.AutoShootVis and not rbIsVisible(plr) then return end
+    if RageSettings.FFCheck and char:FindFirstChildOfClass("ForceField") then return end
+    -- Auto-equip on shoot range: if the chosen tool isn't currently held,
+    if RageSettings.AutoShootEquip and RageSettings.AutoShootEquipTool ~= "" then
+        local heldTool = lchar:FindFirstChildOfClass("Tool")
+        if not heldTool or heldTool.Name ~= RageSettings.AutoShootEquipTool then
+            -- Wrong / no tool held: try to equip, then wait a frame
+            if (now - _rbLastAutoEquipAt) > 0.2 then
+                _rbLastAutoEquipAt = now
+                local bp = lplr:FindFirstChild("Backpack")
+                local tool = bp and bp:FindFirstChild(RageSettings.AutoShootEquipTool)
+                local hum = lchar:FindFirstChildOfClass("Humanoid")
+                if tool and hum then
+                    pcall(function() hum:EquipTool(tool) end)
+                end
+            end
+            return
+        end
+        -- Correct tool already held: do nothing, fall through to shoot.
+    end
+    if RageSettings.AutoShootRequireTool then
+        local lc = lplr.Character
+        if not lc or not lc:FindFirstChildOfClass("Tool") then return end
+    end
+    _rbLastShot = tick()
+    -- HC Force Hit hook: when active, fire the synthetic Shoot remote
+    if G.hcForceHitActive
+        and hook and hook.games and hook.games.hoodCustoms
+        and hook.games.hoodCustoms.forceHit
+        and hook.games.hoodCustoms.forceHit.fire then
+        hook.games.hoodCustoms.forceHit.fire()
+        return
+    end
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,true,game,0)
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,0)
+end)
+
+hook.ragebot = {
+    settings    = RageSettings,
+    lockClosest = rbLockClosest,
+    lockPlayer  = rbLockByPlayer,
+    addTarget   = rbAddTarget,
+    unlock      = rbUnlock,
+    tpBehind    = rbTpBehind,
+    getTarget   = rbGetTarget,   -- current highest-priority target (used by HC knifeBot/forceHit)
+    setSilentForce  = function(b) RageSettings.SilentForce = b == true end,
+    setSilentMethod = function(s) RageSettings.SilentMethod = tostring(s) end,
+    setShowLine     = function(b) RageSettings.ShowLine = b == true end,
+    setShowOutline  = function(b) RageSettings.ShowOutline = b == true end,
+    setLineOrigin   = function(s) RageSettings.LineOrigin = tostring(s) end,
+    setOutlineColor = function(c) if typeof(c) == "Color3" then RageSettings.OutlineColor = c; if RB_outlineHL then RB_outlineHL.OutlineColor = c end end end,
+    setLineColor    = function(c) if typeof(c) == "Color3" then RageSettings.LineColor    = c end end,
+    setSkipKnocked  = function(b) RageSettings.SkipKnocked = b == true end,
+    setIgnoreKnocked = function(b) RageSettings.IgnoreKnocked = b == true end,
+    setFaceTarget  = function(b) RageSettings.FaceTarget = b == true end,
+    setOrbit       = function(b) RageSettings.Orbit = b == true end,
+    setOrbitDistance = function(n) RageSettings.OrbitDistance = math.clamp(tonumber(n) or 15, 2, 200) end,
+    setOrbitSpeed    = function(n) RageSettings.OrbitSpeed    = math.clamp(tonumber(n) or 60, 1, 9999) end,
+    setOrbitHeight   = function(n) RageSettings.OrbitHeight   = math.clamp(tonumber(n) or 5, -50, 50) end,
+    setAutoShoot     = function(b) RageSettings.AutoShoot = b == true end,
+    setAutoShootDist     = function(n) RageSettings.AutoShootDist = math.clamp(tonumber(n) or 50, 1, 500) end,
+    setAutoShootCooldown = function(n) RageSettings.AutoShootCooldown = math.clamp(tonumber(n) or 100, 0, 10000) end,
+    setAutoShootRequireTool = function(b) RageSettings.AutoShootRequireTool = b == true end,
+    -- auto-equip-on-shoot
+    setAutoShootEquip     = function(b) RageSettings.AutoShootEquip = b == true end,
+    setAutoShootEquipTool = function(s) RageSettings.AutoShootEquipTool = tostring(s or "") end,
+    getAutoShootEquipTool = function() return RageSettings.AutoShootEquipTool end,
+    -- knocked grace
+    setKnockedGraceDelay = function(n) RageSettings.KnockedGraceDelay = math.clamp(tonumber(n) or 0, 0, 20) end,
+    getKnockedGraceDelay = function() return RageSettings.KnockedGraceDelay end,
+    setAutoShootVis  = function(b) RageSettings.AutoShootVis = b == true end,
+    setFFCheck       = function(b) RageSettings.FFCheck = b == true end,
+    setEquipDelay    = function(n) RageSettings.EquipDelay = math.clamp(tonumber(n) or 0.5, 0, 5) end,
+    setCamSnap       = function(b) RageSettings.CamSnap = b == true end,
+    setCamSmoothing  = function(n) RageSettings.CamSmoothing = math.clamp(tonumber(n) or 0.15, 0.01, 0.99) end,
+    setSpeedPanic    = function(b) RageSettings.SpeedPanic = b == true end,
+    setSwitchByMouse = function(b) RageSettings.SwitchByMouse = b == true end,
+    setPriority = function(s)
+        local valid = { Closest=true, Mouse=true, workspace.CurrentCamera=true,
+                        LowestHP=true, HighestThreat=true }
+        if valid[s] then RageSettings.Priority = s end
+    end,
+    getPriority = function() return RageSettings.Priority end,
+    -- getTarget is defined above as rbGetTarget (the computed current target);
+    -- the manual TargetPlayer is available via getTargetList/isTargeted
+    getTargetList    = function()
+        local out = {}
+        for _, e in ipairs(_rbTargetList) do
+            if e.plr and e.plr.Parent then table.insert(out, e.plr) end
+        end
+        return out
+    end,
+    isTargeted       = function(plr)
+        if not plr then return false end
+        for _, e in ipairs(_rbTargetList) do
+            if e.userId == plr.UserId then return true end
+        end
+        return false
+    end,
+}
+--  RAGEBOT: TP-SHOOT
+hook.ragebot.tpShoot = function()
+    local target = RageSettings.TargetPlayer
+    if not target then return end
+    local char = target.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local lc   = lplr.Character
+    local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+    if not lhrp then return end
+
+    local saved = lhrp.CFrame
+    -- TP into the target, upright, facing target's horizontal direction
+    local lv = hrp.CFrame.LookVector
+    local horiz = Vector3.new(lv.X, 0, lv.Z)
+    if horiz.Magnitude < 0.01 then horiz = Vector3.new(0, 0, -1) end
+    horiz = horiz.Unit
+    local position = hrp.Position - horiz * (RageSettings.TpBehindDist or 0)
+    _uprightTp(lc, lhrp, position, horiz)
+
+    pcall(function()
+        local vim = VirtualInputManager
+        vim:SendMouseButtonEvent(0, 0, 0, true,  game, 0)
+        vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    end)
+
+    -- Detect rage-target stomp mode at call time. If on, instead of the
+    local rageOn = hook.games and hook.games.hoodCustoms
+        and hook.games.hoodCustoms.autoStomp
+        and hook.games.hoodCustoms.autoStomp.getRageTargets
+        and hook.games.hoodCustoms.autoStomp.getRageTargets()
+
+    -- run the wait + restore in a separate coroutine so the keybind handler
+    task.spawn(function()
+        if rageOn then
+            -- wait for the TARGET's BodyEffects.Dead to become true.
+            local deadline = tick() + 10
+            local function targetDead()
+                local function isTrue(node)
+                    local fx = node and node:FindFirstChild("BodyEffects")
+                    local d  = fx and fx:FindFirstChild("Dead")
+                    return d ~= nil and d.Value == true
+                end
+                if isTrue(target.Character) then return true end
+                local wsp = workspace:FindFirstChild("Players")
+                local chars = wsp and wsp:FindFirstChild("Characters")
+                local mdl = chars and chars:FindFirstChild(target.Name)
+                if isTrue(mdl) then return true end
+                return false
+            end
+            while tick() < deadline do
+                if targetDead() then break end
+                task.wait()
+            end
+        else
+            task.wait(0.15)
+        end
+
+        local nc = lplr.Character
+        local nhrp = nc and nc:FindFirstChild("HumanoidRootPart")
+        if nhrp then
+            _uprightTp(nc, nhrp, saved.Position, saved.LookVector)
+        end
+    end)
+end
+
+--  RAGEBOT: TARGET HUD  (floating panel with avatar/name/hp/tool/dist)
+local _rbHud, _rbHudConn, _rbHudFrame, _rbAvatar, _rbName, _rbHpFill, _rbHeld, _rbDist
+local _rbHudLastUid = nil
+
+local function _buildRbHud()
+    if _rbHud and _rbHud.Parent then return end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "_wh_rb_hud"
+    sg.ResetOnSpawn = false
+    sg.IgnoreGuiInset = true
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    sg.DisplayOrder = 9997
+    pcall(function() sg.Parent = lplr:WaitForChild("PlayerGui") end)
+    if not sg.Parent then sg.Parent = game:GetService("CoreGui") end
+    _rbHud = sg
+
+    local frame = Instance.new("Frame")
+    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
+    frame.BackgroundTransparency = 0.12
+    frame.BorderSizePixel = 0
+    frame.AnchorPoint = Vector2.new(0.5, 1)
+    frame.Position = UDim2.new(0.5, 0, 1, -90)
+    frame.Size = UDim2.new(0, 320, 0, 64)
+    frame.Visible = false
+    frame.Parent = sg
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = frame end
+    do local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(60, 60, 70); s.Thickness = 1
+       s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border; s.Parent = frame end
+    _rbHudFrame = frame
+
+    local avatar = Instance.new("ImageLabel")
+    avatar.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    avatar.BorderSizePixel = 0
+    avatar.Size = UDim2.new(0, 52, 0, 52)
+    avatar.AnchorPoint = Vector2.new(0, 0.5)
+    avatar.Position = UDim2.new(0, 6, 0.5, 0)
+    avatar.ScaleType = Enum.ScaleType.Crop
+    avatar.Image = ""
+    avatar.Parent = frame
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 4); c.Parent = avatar end
+    _rbAvatar = avatar
+
+    local text = Instance.new("Frame")
+    text.BackgroundTransparency = 1
+    text.BorderSizePixel = 0
+    text.AnchorPoint = Vector2.new(0, 0)
+    text.Position = UDim2.new(0, 64, 0, 4)
+    text.Size = UDim2.new(1, -70, 1, -8)
+    text.Parent = frame
+    do local l = Instance.new("UIListLayout"); l.SortOrder = Enum.SortOrder.LayoutOrder
+       l.Padding = UDim.new(0, 2); l.Parent = text end
+
+    local function lbl(order, h)
+        local l = Instance.new("TextLabel"); l.BackgroundTransparency = 1; l.BorderSizePixel = 0
+        l.Size = UDim2.new(1, 0, 0, h or 13); l.LayoutOrder = order
+        l.Font = Enum.Font.Gotham; l.Text = ""; l.TextColor3 = Color3.fromRGB(235, 235, 240)
+        l.TextScaled = true; l.TextXAlignment = Enum.TextXAlignment.Left; l.Parent = text
+        local c = Instance.new("UITextSizeConstraint"); c.MaxTextSize = 11; c.Parent = l
+        return l
+    end
+
+    _rbName = lbl(1, 13)
+    -- health bar (between name and held)
+    local hpBg = Instance.new("Frame"); hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    hpBg.BorderSizePixel = 0; hpBg.Size = UDim2.new(1, 0, 0, 6); hpBg.LayoutOrder = 2
+    hpBg.Parent = text
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 3); c.Parent = hpBg end
+    _rbHpFill = Instance.new("Frame")
+    _rbHpFill.BackgroundColor3 = Color3.fromRGB(75, 200, 95)
+    _rbHpFill.BorderSizePixel = 0; _rbHpFill.Size = UDim2.new(1, 0, 1, 0); _rbHpFill.Parent = hpBg
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 3); c.Parent = _rbHpFill end
+
+    _rbHeld = lbl(3, 11)
+    _rbDist = lbl(4, 11)
+end
+
+local function _rbHudUpdate()
+    if not _rbHudFrame then return end
+    local plr = RageSettings.TargetPlayer
+    local char = plr and plr.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not plr or not hrp or not hum or hum.Health <= 0 then
+        _rbHudFrame.Visible = false
+        return
+    end
+    _rbHudFrame.Visible = true
+
+    local dn = plr.DisplayName
+    local un = plr.Name
+    _rbName.Text = (dn ~= un and dn .. " (@" .. un .. ")" or "@" .. un) .. " / " .. tostring(plr.UserId)
+    _rbName.TextColor3 = Color3.fromRGB(140, 200, 255)
+
+    local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+    _rbHpFill.Size = UDim2.new(pct, 0, 1, 0)
+    _rbHpFill.BackgroundColor3 = Color3.fromRGB(
+        math.floor((1 - pct) * 220) + 35,
+        math.floor(pct * 180) + 55,
+        40)
+
+    local tool = char:FindFirstChildOfClass("Tool")
+    _rbHeld.Text = "Holding: " .. (tool and tool.Name or "none")
+    _rbHeld.TextColor3 = tool and Color3.fromRGB(255, 215, 60) or Color3.fromRGB(160, 160, 170)
+
+    local lc = lplr.Character
+    local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+    if lhrp then
+        _rbDist.Text = ("Distance: %d studs"):format(math.floor((lhrp.Position - hrp.Position).Magnitude))
+    else _rbDist.Text = "" end
+    _rbDist.TextColor3 = Color3.fromRGB(160, 160, 170)
+
+    if plr.UserId ~= _rbHudLastUid then
+        _rbHudLastUid = plr.UserId
+        _rbAvatar.Image = ""
+        task.spawn(function()
+            local ok, img = pcall(function()
+                return plrs:GetUserThumbnailAsync(plr.UserId,
+                    Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+            end)
+            if ok and _rbAvatar then _rbAvatar.Image = img end
+        end)
+    end
+end
+
+local function startRbTargetGui()
+    G.rbTargetGuiActive = true
+    _buildRbHud()
+    if _rbHud then _rbHud.Enabled = true end
+    if _rbHudConn then _rbHudConn:Disconnect() end
+    _rbHudConn = RunService.RenderStepped:Connect(function()
+        if not G.rbTargetGuiActive then return end
+        _rbHudUpdate()
+    end)
+end
+
+local function stopRbTargetGui()
+    G.rbTargetGuiActive = false
+    if _rbHudConn then _rbHudConn:Disconnect(); _rbHudConn = nil end
+    if _rbHudFrame then _rbHudFrame.Visible = false end
+    if _rbHud then _rbHud.Enabled = false end
+end
+
+hook.ragebot.targetGui = makeToggle(startRbTargetGui, stopRbTargetGui, "rbTargetGuiActive")
+end
+
+-- ============================================================
 --  HOOD CUSTOMS BACKEND  (moved here from functions.lua)
 --  Registers onto hook.games.hoodCustoms so the shared ragebot
 --  in functions.lua can still reach it. Deps come from hook.util.
