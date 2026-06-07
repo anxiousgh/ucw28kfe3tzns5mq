@@ -428,23 +428,50 @@ do
     local function destroyClone()
         if clone then clone:Destroy(); clone = nil end
     end
+    local function highlight(model)
+        local h = Instance.new("Highlight")
+        h.FillColor           = Color3.fromRGB(0, 200, 255)
+        h.OutlineColor        = Color3.fromRGB(255, 255, 255)
+        h.FillTransparency    = 0.5
+        h.OutlineTransparency = 0
+        h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop  -- visible through walls
+        h.Adornee             = model
+        h.Parent              = model
+    end
     local function buildClone()
         destroyClone()
         local char = LocalPlr.Character
         if not char then return end
+        -- character models are often Archivable=false (can't be cloned);
+        -- flip it on temporarily so :Clone() actually returns something
+        local prevArch = char.Archivable
+        char.Archivable = true
         local ok, c = pcall(function() return char:Clone() end)
-        if not ok or not c then return end
-        for _, d in ipairs(c:GetDescendants()) do
-            if d:IsA("BasePart") then
-                d.Anchored = true; d.CanCollide = false; d.CanQuery = false; d.CastShadow = false
-                d.Material = Enum.Material.ForceField
-            elseif d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Humanoid") then
-                pcall(function() d:Destroy() end)
+        char.Archivable = prevArch
+        if ok and c then
+            for _, d in ipairs(c:GetDescendants()) do
+                if d:IsA("BasePart") then
+                    d.Anchored = true; d.CanCollide = false; d.CanQuery = false; d.CastShadow = false
+                    d.Transparency = math.min(d.Transparency, 0.4)  -- ensure it's visible
+                    d.Material = Enum.Material.ForceField
+                elseif d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Humanoid") then
+                    pcall(function() d:Destroy() end)
+                end
             end
+            c.Name = "_wh_serverpos"
+            highlight(c)
+            c.Parent = workspace
+            clone = c
+            return
         end
-        c.Name = "_wh_serverpos"
-        c.Parent = workspace
-        clone = c
+        -- fallback: cloning blocked -> a simple bright marker part
+        local m = Instance.new("Part")
+        m.Name = "_wh_serverpos"; m.Size = Vector3.new(2, 5, 1)
+        m.Anchored = true; m.CanCollide = false; m.CanQuery = false; m.CastShadow = false
+        m.Material = Enum.Material.Neon; m.Color = Color3.fromRGB(0, 200, 255); m.Transparency = 0.3
+        highlight(m)
+        m.Parent = workspace
+        clone = m
     end
 
     regToggle(Visuals, "ServerPosViz", "Server position visualizer", false, function(v)
