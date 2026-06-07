@@ -4096,6 +4096,14 @@ F.desync = (function()
                         local r = findRaknet()
                         if r and r.add_send_hook and getgenv()._F_DESYNC_RAKNET_FN then
                             pcall(function()
+                                -- remove the old registration FIRST so the hook
+                                -- can't stack. Re-adding without removing piles
+                                -- up duplicates on some executors, so every
+                                -- outbound packet runs through more and more
+                                -- copies until the game freezes.
+                                if r.remove_send_hook then
+                                    r.remove_send_hook(getgenv()._F_DESYNC_RAKNET_FN)
+                                end
                                 r.add_send_hook(getgenv()._F_DESYNC_RAKNET_FN)
                             end)
                         end
@@ -4238,7 +4246,15 @@ F.desync = (function()
         getgenv()._F_DESYNC_SYNC_END      = 0
         -- always remove the ghost on any stop (cheap if it doesn't exist)
         ghostRemove()
-        -- We intentionally DO NOT call r.remove_send_hook here. The hook
+        -- remove the raknet send-hook so NOTHING runs per outbound packet
+        -- while desync is off, and allow a clean single re-install next enable
+        pcall(function()
+            local r = findRaknet()
+            if r and r.remove_send_hook and getgenv()._F_DESYNC_RAKNET_FN then
+                r.remove_send_hook(getgenv()._F_DESYNC_RAKNET_FN)
+            end
+        end)
+        getgenv()._F_DESYNC_RAKNET_INSTALLED = false
         if hbConn then hbConn:Disconnect(); hbConn = nil end
         pcall(function() RunService:UnbindFromRenderStep(RESTORE_BIND) end)
         local c = lplr.Character
