@@ -120,7 +120,7 @@ local function rbScoreTarget(plr, char, hrp, hum, lhrp, cam, mousePos, camPos, c
         local sp, onScreen = cam:WorldToViewportPoint(hrp.Position)
         if not onScreen then return math.huge end
         return (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
-    elseif mode == "workspace.CurrentCamera" then
+    elseif mode == "Camera" then
         local toTarget = (hrp.Position - camPos).Unit
         local dotV = toTarget:Dot(camLook)
         if dotV <= 0 then return math.huge end  -- behind us
@@ -515,7 +515,7 @@ hook.ragebot = {
     setSpeedPanic    = function(b) RageSettings.SpeedPanic = b == true end,
     setSwitchByMouse = function(b) RageSettings.SwitchByMouse = b == true end,
     setPriority = function(s)
-        local valid = { Closest=true, Mouse=true, workspace.CurrentCamera=true,
+        local valid = { Closest=true, Mouse=true, Camera=true,
                         LowestHP=true, HighestThreat=true }
         if valid[s] then RageSettings.Priority = s end
     end,
