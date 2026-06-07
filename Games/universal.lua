@@ -31,6 +31,7 @@ regToggle(Aim, "CamSticky",      "Sticky target",     cs.Sticky or false,      f
 regToggle(Aim, "CamClosestPart", "Closest bodypart",  cs.ClosestPart or false, function(v) cam.setClosestPart(v) end)
 regToggle(Aim, "CamToolCheck",   "Tool check",        cs.ToolCheck or false,   function(v) cam.setToolCheck(v) end)
 regToggle(Aim, "CamOnlyVisible", "Only while visible", cs.OnlyVisible or false, function(v) cam.setOnlyVisible(v) end)
+regToggle(Aim, "CamOnlyFirstPerson", "Only in 1st Person", cs.OnlyFirstPerson or false, function(v) cam.setOnlyFirstPerson(v) end)
 
 regDropdown(Aim, "CamHitPart", "Hit part", cs.TargetPart or "Head",
     { "Head", "HumanoidRootPart", "UpperTorso", "Random" }, false, function(v) cam.setHitPart(v) end)

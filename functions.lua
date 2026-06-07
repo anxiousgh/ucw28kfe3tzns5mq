@@ -74,7 +74,7 @@ local CamLockSettings = {
     Mode="Mouse", FOVRadius=200, ShowFOV=false,
     Prediction=false, PredictionAmount=0.165,
     Smoothing=0.25, Sticky=true,
-    ToolCheck=false, OnlyVisible=false,
+    ToolCheck=false, OnlyVisible=false, OnlyFirstPerson=false,
 }
 
 local TrigSettings = {
@@ -1778,10 +1778,12 @@ RunService.RenderStepped:Connect(function(dt)
     end
     if not CamLockSettings.Enabled then clStickyTarget = nil; return end
     if G.freecamActive then return end
-    -- only lock when the mouse is locked to center (first person OR shift lock)
-    -- or while holding right click; free-mouse third person is left alone
-    if not (UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
-        or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then
+    -- "Only in 1st Person": only lock when the mouse is locked to center
+    -- (first person OR shift lock) or while holding right click; free-mouse
+    -- third person is left alone. Off = lock regardless.
+    if CamLockSettings.OnlyFirstPerson
+        and not (UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+            or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then
         clStickyTarget = nil
         return
     end
@@ -3934,6 +3936,7 @@ F.camLock = {
     setClosestPart  = function(b) CamLockSettings.ClosestPart = b == true end,
     setToolCheck    = function(b) CamLockSettings.ToolCheck = b == true end,
     setOnlyVisible  = function(b) CamLockSettings.OnlyVisible = b == true end,
+    setOnlyFirstPerson = function(b) CamLockSettings.OnlyFirstPerson = b == true end,
 }
 
 -- triggerbot
