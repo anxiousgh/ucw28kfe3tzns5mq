@@ -1637,6 +1637,10 @@ if hookmetamethod then
     end -- _F_NAMECALL_HOOKED guard
 end
 
+do  -- scope camlock + triggerbot locals so they don't count toward the
+    -- top-level 200-local (register) limit. The RenderStepped/Heartbeat
+    -- connections below capture what they need as upvalues, so they keep
+    -- running after this block closes.
 -- ============================================================
 --  CAMLOCK CORE
 -- ============================================================
@@ -1989,6 +1993,7 @@ RunService.Heartbeat:Connect(function(dt)
         vim:SendMouseButtonEvent(0,0,0,false,game,0)
     end)
 end)
+end  -- end camlock + triggerbot scope
 
 -- ============================================================
 --  RAGEBOT CORE
