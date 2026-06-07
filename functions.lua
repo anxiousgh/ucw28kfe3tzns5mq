@@ -1241,19 +1241,17 @@ end
 local function clFindTarget()
     local cam = workspace.CurrentCamera
     local mousePos = UserInputService:GetMouseLocation()
+    -- Sticky: once a target is acquired, HOLD it as long as they're alive,
+    -- even if they leave the FOV. (FOV only gates ACQUIRING a new target in
+    -- the scan below.) Drop it only when they die / leave.
     if CamLockSettings.Sticky and clStickyTarget then
         local sPlr = plrs:GetPlayerFromCharacter(clStickyTarget.Parent)
         if sPlr and clIsAlive(sPlr) then
             local char = sPlr.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            -- keep the sticky target ONLY while they're still inside the FOV;
-            local checkPart = hrp and (char:FindFirstChild(CamLockSettings.TargetPart) or hrp)
-            if checkPart then
-                local sp, onScreen = cam:WorldToViewportPoint(checkPart.Position)
-                if onScreen and (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude <= CamLockSettings.FOVRadius then
-                    clStickyTarget = clGetPartForPlayer(char, hrp)
-                    return clStickyTarget
-                end
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                clStickyTarget = clGetPartForPlayer(char, hrp)
+                return clStickyTarget
             end
         end
         clStickyTarget = nil
