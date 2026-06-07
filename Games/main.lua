@@ -218,6 +218,8 @@ regSlider(Movement, "CFrameMult", "CFrame speed multiplier", "x", { min = 1, max
     function(v) hook.cframeSpeed.setMultiplier(v) end)
 
 regToggle(Movement, "AllowJump", "Allow jump", false, function(v) if v then hook.forceJump.start() else hook.forceJump.stop() end end)
+regToggle(Movement, "Noclip", "Noclip", false, function(v) if v then hook.noclip.start() else hook.noclip.stop() end end)
+regToggle(Movement, "ClickTp", "Click teleport", false, function(v) if v then hook.clickTp.start() else hook.clickTp.stop() end end)
 
 -- ---------- CSGO HVH movement ----------
 Movement:NewSection("CSGO HVH movement")
