@@ -1740,8 +1740,16 @@ local function clFindTarget()
         if sPlr and clIsAlive(sPlr) then
             local char = sPlr.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then clStickyTarget = clGetPartForPlayer(char, hrp) end
-            return clStickyTarget
+            -- keep the sticky target ONLY while they're still inside the FOV;
+            -- once they leave it, drop them so the lock requires FOV again
+            local checkPart = hrp and (char:FindFirstChild(CamLockSettings.TargetPart) or hrp)
+            if checkPart then
+                local sp, onScreen = cam:WorldToViewportPoint(checkPart.Position)
+                if onScreen and (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude <= CamLockSettings.FOVRadius then
+                    clStickyTarget = clGetPartForPlayer(char, hrp)
+                    return clStickyTarget
+                end
+            end
         end
         clStickyTarget = nil
     end
