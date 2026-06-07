@@ -11,6 +11,7 @@ if not api then return end   -- backend failed to load
 
 local Window = ctx.window
 local hook   = api.hook
+local notify = api.notify
 local regToggle, regSlider, regDropdown = api.regToggle, api.regSlider, api.regDropdown
 
 local cam  = hook.camLock
@@ -22,6 +23,24 @@ local ts   = trig.settings
 --  AIMLOCK  (camera lock)
 -- ============================================================
 local Aim = Window:NewTab("Aimlock")
+
+-- ---------- Target lock (shared by camlock + triggerbot) ----------
+-- One key locks onto the single target under your crosshair; press again to
+-- unlock. While locked, BOTH camlock and triggerbot focus only on that target.
+Aim:NewSection("Target lock")
+Aim:NewKeybind("Lock / unlock target", Enum.KeyCode.E, function()
+    local wasLocked = cam.getLocked() ~= nil
+    local locked, plr = cam.lockToggle()
+    if locked and plr then
+        notify("Locked onto " .. plr.Name, 2, "success")
+    elseif wasLocked then
+        notify("Target unlocked", 2, "information")
+    else
+        notify("No target under your crosshair", 2, "alert")
+    end
+end)
+Aim:NewLabel("While a target is locked, camlock + triggerbot use only that target.", "left")
+
 Aim:NewSection("Camera lock")
 
 regToggle(Aim, "CamEnabled", "Enabled", cs.Enabled or false, function(v) cam.setEnabled(v) end)
