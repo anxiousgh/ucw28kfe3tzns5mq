@@ -1498,6 +1498,10 @@ RunService.Heartbeat:Connect(function(dt)
     end
     local cam = workspace.CurrentCamera
     local mousePos = UserInputService:GetMouseLocation()
+    -- GetMouseLocation includes the GUI top-bar inset (~36px) but
+    -- WorldToViewportPoint does NOT, so add it back or a dead-on aim reads as
+    -- ~36px away and never trips the FOV.
+    local inset = game:GetService("GuiService"):GetGuiInset()
 
     if TB_fovCircle then
         TB_fovCircle.Visible = TrigSettings.ShowFOV
@@ -1538,7 +1542,7 @@ RunService.Heartbeat:Connect(function(dt)
                     if part:IsA("BasePart") then
                         local sp, onScreen = cam:WorldToViewportPoint(part.Position)
                         if onScreen then
-                            local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
+                            local d = (mousePos - (Vector2.new(sp.X, sp.Y) + inset)).Magnitude
                             if d <= TrigSettings.FOVRadius and d < bestD then
                                 hitPlr, hitPart, bestD = plr, part, d
                             end
@@ -1550,7 +1554,7 @@ RunService.Heartbeat:Connect(function(dt)
                 if part then
                     local sp, onScreen = cam:WorldToViewportPoint(part.Position)
                     if onScreen then
-                        local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
+                        local d = (mousePos - (Vector2.new(sp.X, sp.Y) + inset)).Magnitude
                         if d <= TrigSettings.FOVRadius and d < bestD then
                             hitPlr, hitPart, bestD = plr, part, d
                         end
