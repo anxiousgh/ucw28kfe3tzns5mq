@@ -37,6 +37,131 @@ plrs.PlayerRemoving:Connect(function() task.defer(function() _cachedPlayers = pl
 
 --// no-op GUI stubs (the original script wired these to the legacy GUI;
 --   we keep the calls to preserve behavior without doing anything visible)
+
+--// shared state
+local G = { speedValue = 2 }
+local FLY_SPEED   = 60
+local SPIN_SPEED  = 50
+local ICE_SLIDE   = 0.98
+local BLINK_DIST  = 20
+local CUSTOM_FOV  = 70
+
+local BHOP_CFG = {
+    AIR_ACCEL              = 250,
+    AIR_SPEED              = 50,
+    AIR_MAX_SPEED          = 100,
+    AIR_MAX_SPEED_FRIC     = 3,
+    AIR_MAX_SPEED_FRIC_DEC = 1,
+    AIR_FRICTION           = 0.05,
+    FRICTION               = 3,
+    GROUND_DECCEL          = 10,
+    JUMP_VELOCITY          = 20,
+}
+
+local AimbotSettings = {
+    Enabled=false, TeamCheck=false, VisibleCheck=false,
+    TargetPart="HumanoidRootPart", Method="Mouse.Hit/Target", ClosestPart=false,
+    FOVRadius=130, ShowFOV=false, ShowTarget=false,
+    Prediction=false, PredictionAmount=0.165, HitChance=100,
+}
+
+local CamLockSettings = {
+    Enabled=false, TeamCheck=false, VisibleCheck=false,
+    TargetPart="Head", ClosestPart=false,
+    Mode="Mouse", FOVRadius=200, ShowFOV=false,
+    Prediction=false, PredictionAmount=0.165,
+    Smoothing=0.25, Sticky=true,
+    ToolCheck=false, OnlyVisible=false, OnlyFirstPerson=false,
+}
+
+local TrigSettings = {
+    Enabled=false, TeamCheck=false, VisibleCheck=false,
+    Prediction=false, PredictionAmount=0.1,
+    ClickDelay=0, FOVRadius=20, ShowFOV=false,
+    TargetPart="HumanoidRootPart", ShowTarget=false,
+    ToolCheck=false,
+}
+
+local RageSettings = {
+    TargetUserId=nil, TargetPlayer=nil, SkipKnocked=false, IgnoreKnocked=false,
+    ShowLine=true, ShowOutline=true, LineOrigin="Bottom", FaceTarget=false,
+    OutlineColor = Color3.fromRGB(255, 80, 80),
+    LineColor    = Color3.fromRGB(255, 60, 60),
+    Orbit=false, OrbitDistance=15, OrbitSpeed=60, OrbitHeight=5,
+    AutoShoot=false, AutoShootDist=50, AutoShootVis=true, AutoShootRequireTool=false,
+    AutoShootCooldown=100, EquipDelay=0.5, FFCheck=true,
+    -- when on, equip AutoShootEquipTool (from backpack) the moment
+    -- a target enters AutoShootDist range, before firing.
+    AutoShootEquip=false, AutoShootEquipTool="",
+    -- post-knocked grace window (ms). If the target was seen knocked
+    -- within the last N ms, hold fire even if they currently read as
+    -- alive - covers the brief respawn window where the old corpse
+    -- is still selectable but the new character isn't there yet.
+    KnockedGraceDelay=0,
+    SilentForce=false, SilentMethod="All",
+    SpeedPanic=false, SpeedPanicVal=0,
+    TpBehind=false, TpBehindDist=0,
+    CamSnap=false, CamSmoothing=0.15,
+    AutoSwitch=true, NotifyTarget=true,
+    SwitchByMouse=false,
+    -- Priority mode for rbGetTarget. One of:
+    --   "Closest"         - world distance from local HRP (default)
+    --   "Mouse"           - screen distance from cursor
+    --   "Camera"          - smallest angle from camera lookvector
+    --   "LowestHP"        - lowest Humanoid.Health first
+    --   "HighestThreat"   - close + holding a tool first
+    Priority="Closest",
+}
+
+local EspSettings = {
+    Enabled=false, BoxESP=false, NameESP=false, HealthESP=false, HealthNum=false,
+    DistanceESP=false, TracerESP=false, SkeletonESP=false, TeamCheck=false,
+    ChamsEnabled=false, HeldItem=false, SelfESP=false,
+    RadarEnabled=false, XCTEnabled=false, TracerHistory=false, TracerHistLen=2,
+    BoxStyle="Corners", TracerOrigin="Bottom", ChamsStyle="Overlay",
+    -- Colors (live-readable by render code; setters on F.esp).
+    EnemyColor    = Color3.fromRGB(220,  60,  60),
+    TeamColor     = Color3.fromRGB( 80, 220,  80),
+    NeutralColor  = Color3.fromRGB(255, 255, 255),
+    ChamsFill     = Color3.fromRGB(255,  60,  60),
+    ChamsOutline  = Color3.fromRGB(255, 255, 255),
+    HealthBarColor= Color3.fromRGB( 80, 220,  80),
+    TracerColor   = Color3.fromRGB(255,  60,  60),
+}
+
+local _rbTargetList = {}
+
+-- ============================================================
+--  VISIBILITY HELPER (cache raw Raycast before any hooks)
+-- ============================================================
+local rawRaycast = workspace.Raycast
+local _visParams = RaycastParams.new()
+_visParams.FilterType = Enum.RaycastFilterType.Exclude
+
+-- when strict, any raycast hit blocks visibility (even see-through /
+-- no-collide / no-shadow parts). Default false matches the old "smart"
+-- behavior that ignored decorative geometry.
+local _visStrict = false
+-- which point the visibility raycast STARTS from. One of:
+--   "Camera" - workspace.CurrentCamera.CFrame.Position (default, classic)
+--   "Head"   - lplr.Character.Head.Position
+--   "Tool"   - currently-equipped Tool's Handle.Position, falls back to Head
+local _visOrigin = "Camera"
+local function _visGetOrigin()
+    local mode = _visOrigin
+    local c = lplr.Character
+    if mode == "Tool" and c then
+        local tool = c:FindFirstChildOfClass("Tool")
+        local handle = tool and tool:FindFirstChild("Handle")
+        if handle then return handle.Position end
+        mode = "Head"  -- fall through if no tool equipped
+    end
+    if mode == "Head" and c then
+        local head = c:FindFirstChild("Head")
+        if head then return head.Position end
+    end
+    return workspace.CurrentCamera.CFrame.Position
+end
 local function isReallyVisible(fromPos, toPos, ignoreList)
     local dir = toPos - fromPos
     local dist = dir.Magnitude
@@ -2590,6 +2715,8 @@ F.cframeSpeed = {
     setMultiplier = function(n) G.speedValue = tonumber(n) or G.speedValue end,
     getMultiplier = function() return G.speedValue end,
 }
+-- legacy alias (old code referenced F.speed)
+
 F.forceJump = makeToggle(startForceJump, stopForceJump, "forceJumpActive")
 F.clickTp   = makeToggle(startClickTp,   stopClickTp,   "clickTpActive")
 F.noclip    = makeToggle(startNoclip,    stopNoclip,    "noclipActive")
@@ -4242,6 +4369,44 @@ end
 F.ragebot.targetGui = makeToggle(startRbTargetGui, stopRbTargetGui, "rbTargetGuiActive")
 
 -- ============================================================
+--  AUTO-EQUIP
+--  Picks a tool by name and equips it. Optionally auto-equips it
+--  on respawn so you never spawn empty-handed.
+-- ============================================================
+
+-- ============================================================
+--  AUTO WEAPON SWITCH
+--  Switches the equipped tool based on distance to the current
+--  ragebot target. Three configurable slots:
+--    close  : equipped when dist < closeMax
+--    medium : equipped when closeMax <= dist < mediumMax
+--    long   : equipped when dist >= mediumMax
+--  Empty / "(none)" slots are skipped (so leaving 'medium' empty
+--  means close-range tool stays equipped until past mediumMax).
+--  Cooldown between switches stops oscillation at boundaries.
+-- ============================================================
+
+
+-- ============================================================
+--  AUTO-REJOIN ON KICK / VOTEKICK
+--  Detects the LocalPlayer being kicked (vote, manual, idle, etc.)
+--  and replays the loader bootstrap in a fresh server. Generic,
+--  not BMS-specific, but the toggle lives in the BMS groupbox
+--  since that's where the request came from.
+--
+--  Caller (loader) wires this up via:
+--    F.autoRejoin.setLoaderSrc("loadstring(game:HttpGet(...))()")
+--    F.autoRejoin.setOnKick(function() ... save config ... end)
+--    F.autoRejoin.setEnabled(true)
+--
+--  Detection sources (any one trips the rejoin):
+--    * Players.PlayerRemoving for LocalPlayer  -> player:Kick()
+--    * GuiService.ErrorMessageChanged          -> disconnect prompt
+--    * CoreGui RobloxPromptGui ErrorPrompt     -> votekick popup
+-- ============================================================
+-- ============================================================
+--  SHARED TOOLKIT  (exposed to per-game modules in Games/*.lua)
+-- ============================================================
 --  Per-game logic lives in its own Games/<placeId>.lua now and
 --  builds on these. (Hood Customs moved out; ragebot stays here
 --  as the shared targeting system it depends on.)
@@ -4924,6 +5089,27 @@ F.serverPos = (function()
     }
 end)()
 
+-- ============================================================
+--  PULSE LAGSWITCH
+-- ============================================================
+--  Selectively blocks outgoing PHYSICS REPLICATION packets
+--  (PacketId 0x1B) on a configurable on/off duty cycle. Only
+--  character position/velocity is affected - chat, RemoteEvents,
+--  Shoot fires, hit registrations, etc. all pass through normally.
+--
+--  Server sees your position in stuttered bursts (e.g. on 200ms,
+--  off 100ms): from its POV you're frozen for 200ms, jump to the
+--  new position, frozen again, jump, etc. Combined with movement,
+--  this makes you nearly impossible to track for human shooters
+--  and silent-aim alike.
+--
+--  Installs its OWN raknet send_hook independent of F.desync's, so
+--  the two can coexist (though combining is weird). Hook is pinned
+--  in getgenv so script reload doesn't double-stack.
+-- ============================================================
+
+-- ============================================================
+--  WHITELIST  (global, all-features-aware)
 -- ============================================================
 --  Lookup tested by:
 --    * Ragebot targeting (rbGetTarget + rbLockClosest skip
