@@ -664,23 +664,31 @@ do
         pcall(function() track:Stop(0.2) end)
     end
 
+    local function idleHum()   -- humanoid only while alive + standing still
+        local char = LocalPlr.Character
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 and hum.MoveDirection.Magnitude < 0.1 then
+            return hum, char
+        end
+        return nil
+    end
     local function cwFidgetLoop()
-        local target = 30 + math.random() * 30   -- 30-60s of continuous idle
-        local acc = 0
         while cwOn do
-            task.wait(0.5)
+            -- wait 1-60s of continuous idle (moving resets it), then fidget once
+            local target = math.random(1, 60)
+            local acc = 0
+            while cwOn and acc < target do
+                task.wait(0.5)
+                if idleHum() then acc = acc + 0.5 else acc = 0 end
+            end
             if not cwOn then break end
-            local char = LocalPlr.Character
-            local hum  = char and char:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 and hum.MoveDirection.Magnitude < 0.1 then
-                acc = acc + 0.5
-                if acc >= target then
-                    acc = 0
-                    target = 30 + math.random() * 30
-                    playFidget(char, hum)
-                end
-            else
-                acc = 0   -- moving resets the idle timer
+            local hum, char = idleHum()
+            if hum then playFidget(char, hum) end
+            -- then a 60s timeout; ends early the moment you're not idle anymore
+            local t0 = os.clock()
+            while cwOn and (os.clock() - t0) < 60 do
+                task.wait(0.5)
+                if not idleHum() then break end
             end
         end
     end
