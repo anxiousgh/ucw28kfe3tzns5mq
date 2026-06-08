@@ -628,9 +628,9 @@ do
             idle = "rbxassetid://106148437094704",
         },
     }
-    local active  = nil        -- "dog" | "slow" | "sad" | nil
+    local active  = nil        -- "dog" | "slow" | "sad" | "custom" | nil
     local cwSaved = {}         -- [Animation] = original AnimationId
-    local cwConn, cwFidgetThread, dogT, slowT, sadT
+    local cwConn, cwFidgetThread, dogT, slowT, sadT, customT
 
     local function applyPreset(char, preset)
         local animate = char and char:FindFirstChild("Animate")
@@ -719,7 +719,7 @@ do
 
     -- turn off every other preset toggle (mutual exclusivity)
     local function offExcept(keep)
-        for _, t in ipairs({ dogT, slowT, sadT }) do
+        for _, t in ipairs({ dogT, slowT, sadT, customT }) do
             if t and t ~= keep then t:Set(false) end
         end
     end
@@ -735,6 +735,63 @@ do
         if v then offExcept(sadT); setPreset("sad")
         elseif active == "sad" then setPreset(nil) end
     end)
+
+    -- bare number -> rbxassetid://, full string left as-is, blank -> nil
+    local function normId(s)
+        s = tostring(s or ""):gsub("%s", "")
+        if s == "" then return nil end
+        if s:match("^%d+$") then return "rbxassetid://" .. s end
+        return s
+    end
+
+    -- ---- custom animations: set your own walk/run + idle ----
+    AnimTab:NewSection("Custom animations")
+    PRESETS.custom = {}
+    local function reapplyCustom()
+        if active == "custom" then setPreset("custom") end
+    end
+    AnimTab:NewTextbox("Walk / run ID", "", "id or number", "all", "medium", true, false, function(v)
+        local id = normId(v)
+        PRESETS.custom.walk = id
+        PRESETS.custom.run  = id
+        reapplyCustom()
+    end)
+    AnimTab:NewTextbox("Idle ID", "", "id or number", "all", "medium", true, false, function(v)
+        PRESETS.custom.idle = normId(v)
+        reapplyCustom()
+    end)
+    customT = regToggle(AnimTab, "CustomAnimApply", "Apply custom", false, function(v)
+        if v then offExcept(customT); setPreset("custom")
+        elseif active == "custom" then setPreset(nil) end
+    end)
+
+    -- ---- play any animation / emote on yourself ----
+    AnimTab:NewSection("Play animation / emote")
+    local playId, playedTrack = "", nil
+    local function stopPlayed()
+        if playedTrack then pcall(function() playedTrack:Stop(0.1) end); playedTrack = nil end
+    end
+    AnimTab:NewTextbox("Animation / emote ID", "", "id or number", "all", "medium", true, false, function(v)
+        playId = v
+    end)
+    AnimTab:NewButton("Play", function()
+        local id = normId(playId)
+        if not id then notify("Enter an animation ID first", 2, "alert"); return end
+        local char     = LocalPlr.Character
+        local hum      = char and char:FindFirstChildOfClass("Humanoid")
+        local animator = hum and hum:FindFirstChildOfClass("Animator")
+        if not animator then notify("No character loaded", 2, "alert"); return end
+        stopPlayed()
+        local anim = Instance.new("Animation"); anim.AnimationId = id
+        local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
+        if ok and track then
+            pcall(function() track.Priority = Enum.AnimationPriority.Action4 end)
+            pcall(function() track:Play() end)
+            playedTrack = track
+        else
+            notify("Couldn't load that animation", 3, "error")
+        end
+    end):AddButton("Stop", stopPlayed)
 end
 
 -- ============================================================
