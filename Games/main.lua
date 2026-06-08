@@ -637,6 +637,54 @@ do
         cwSaved = {}
     end
 
+    -- random idle "fidget" animations played once after a while of standing still
+    local FIDGETS = {
+        "rbxassetid://92972712226070", "rbxassetid://122475317803320",
+        "rbxassetid://121179940665683", "rbxassetid://92913202939886",
+    }
+    local cwFidgetThread
+
+    local function playFidget(char, hum)
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if not animator then return end
+        local anim = Instance.new("Animation")
+        anim.AnimationId = FIDGETS[math.random(1, #FIDGETS)]
+        local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
+        if not ok or not track then return end
+        pcall(function() track.Priority = Enum.AnimationPriority.Action end)  -- over the idle
+        track.Looped = false
+        pcall(function() track:Play() end)
+        -- let it play until it ends, you move, or a safety timeout
+        local t0 = os.clock()
+        while cwOn and track.IsPlaying do
+            if hum.MoveDirection.Magnitude > 0.1 then break end
+            if os.clock() - t0 > 12 then break end
+            task.wait(0.1)
+        end
+        pcall(function() track:Stop(0.2) end)
+    end
+
+    local function cwFidgetLoop()
+        local target = 30 + math.random() * 30   -- 30-60s of continuous idle
+        local acc = 0
+        while cwOn do
+            task.wait(0.5)
+            if not cwOn then break end
+            local char = LocalPlr.Character
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 and hum.MoveDirection.Magnitude < 0.1 then
+                acc = acc + 0.5
+                if acc >= target then
+                    acc = 0
+                    target = 30 + math.random() * 30
+                    playFidget(char, hum)
+                end
+            else
+                acc = 0   -- moving resets the idle timer
+            end
+        end
+    end
+
     regToggle(Misc, "CustomWalk", "Dog walking animations", false, function(v)
         cwOn = v
         if v then
@@ -645,8 +693,11 @@ do
             cwConn = LocalPlr.CharacterAdded:Connect(function(c)
                 if cwOn then task.wait(0.4); if cwOn then cwApply(c) end end
             end)
+            if cwFidgetThread then pcall(task.cancel, cwFidgetThread) end
+            cwFidgetThread = task.spawn(cwFidgetLoop)
         else
             if cwConn then cwConn:Disconnect(); cwConn = nil end
+            if cwFidgetThread then pcall(task.cancel, cwFidgetThread); cwFidgetThread = nil end
             cwRestore()
         end
     end)
