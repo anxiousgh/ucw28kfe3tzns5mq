@@ -602,6 +602,57 @@ regToggle(Misc, "StickyEmotes", "Emotes stay while moving", false, function(v)
     end
 end)
 
+-- Custom walk/run animation: overwrite the Animate script's walk + run
+-- AnimationIds (the default Animate watches these and reloads, so it applies
+-- live). Re-applies on respawn; restores the originals when toggled off.
+do
+    local WALK_ID  = "rbxassetid://103866486218951"
+    local cwOn     = false
+    local cwSaved  = {}        -- [Animation] = original AnimationId
+    local cwConn
+
+    local function cwTargets(char)
+        local animate = char and char:FindFirstChild("Animate")
+        local out = {}
+        if not animate then return out end
+        for _, name in ipairs({ "walk", "run" }) do
+            local f = animate:FindFirstChild(name)
+            if f then
+                for _, a in ipairs(f:GetChildren()) do
+                    if a:IsA("Animation") then out[#out + 1] = a end
+                end
+            end
+        end
+        return out
+    end
+    local function cwApply(char)
+        for _, a in ipairs(cwTargets(char)) do
+            if cwSaved[a] == nil then cwSaved[a] = a.AnimationId end
+            pcall(function() a.AnimationId = WALK_ID end)
+        end
+    end
+    local function cwRestore()
+        for a, id in pairs(cwSaved) do
+            pcall(function() if a.Parent then a.AnimationId = id end end)
+        end
+        cwSaved = {}
+    end
+
+    regToggle(Misc, "CustomWalk", "Custom walk/run animation", false, function(v)
+        cwOn = v
+        if v then
+            cwApply(LocalPlr.Character)
+            if cwConn then cwConn:Disconnect() end
+            cwConn = LocalPlr.CharacterAdded:Connect(function(c)
+                if cwOn then task.wait(0.4); if cwOn then cwApply(c) end end
+            end)
+        else
+            if cwConn then cwConn:Disconnect(); cwConn = nil end
+            cwRestore()
+        end
+    end)
+end
+
 -- ============================================================
 --  SETTINGS  (universal GUI prefs, autosaved, NOT part of configs)
 -- ============================================================
