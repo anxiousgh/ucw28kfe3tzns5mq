@@ -1491,56 +1491,32 @@ RunService.Heartbeat:Connect(function(dt)
         return
     end
 
-    -- find best player inside FOV. Throttle the scan to ~120 Hz REGARDLESS of
-    -- whether we currently have a target -- the old `or _trigHitPlr == nil`
-    -- meant that with no one in the FOV (i.e. most of the time) the full
-    -- player+part scan ran every single frame, which tanked fps.
-    _trigScanAccum = _trigScanAccum + (dt or 0)
-    if _trigScanAccum >= (1 / 60) then
-        _trigScanAccum = 0
-        local hitPlr, hitPart, bestD = nil, nil, math.huge
-        for _, plr in ipairs(_cachedPlayers or plrs:GetPlayers()) do
-            if plr == lplr then continue end
-            -- triggerbot only fires on the LOCKED target: skip everyone if
-            -- nothing is locked, and skip anyone who isn't the locked player
-            if (not _lockedPlayer) or (plr ~= _lockedPlayer) then continue end
-            if F.whitelist and F.whitelist.contains(plr) then continue end
-            if TrigSettings.TeamCheck and plr.Team == lplr.Team then continue end
-            local char = plr.Character; if not char then continue end
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if not hum or hum.Health <= 0 then continue end
-            if TrigSettings.VisibleCheck and not trigIsVisible(plr) then continue end
-
-            if TrigSettings.TargetPart == "All" then
-                for _, part in ipairs(char:GetChildren()) do
-                    if part:IsA("BasePart") then
-                        local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-                        if onScreen then
-                            local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
-                            if d <= TrigSettings.FOVRadius and d < bestD then
-                                hitPlr, hitPart, bestD = plr, part, d
-                            end
-                        end
-                    end
-                end
-            else
-                local part = tbResolvePart(char, TrigSettings.TargetPart)
-                if part then
-                    local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-                    if onScreen then
-                        local d = (mousePos - Vector2.new(sp.X, sp.Y)).Magnitude
-                        if d <= TrigSettings.FOVRadius and d < bestD then
-                            hitPlr, hitPart, bestD = plr, part, d
-                        end
-                    end
-                end
+    -- Raycast straight through the crosshair at the LOCKED target. Accessories
+    -- (masks, hats, wings) are filtered out, so the ray passes THROUGH a mask
+    -- to the head behind it, and aiming at a wing won't fire unless a real
+    -- bodypart sits behind it. Walls and other players still block the ray.
+    local hitPlr, hitPart = nil, nil
+    if _lockedPlayer and _lockedPlayer ~= lplr then
+        local char   = _lockedPlayer.Character
+        local hum    = char and char:FindFirstChildOfClass("Humanoid")
+        local teamOk = not (TrigSettings.TeamCheck and _lockedPlayer.Team == lplr.Team)
+        local wlOk   = not (F.whitelist and F.whitelist.contains(_lockedPlayer))
+        if char and hum and hum.Health > 0 and teamOk and wlOk then
+            local ignore = {}
+            local lc = lplr.Character; if lc then ignore[#ignore + 1] = lc end
+            for _, d in ipairs(char:GetDescendants()) do
+                if d:IsA("Accessory") then ignore[#ignore + 1] = d end
+            end
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = ignore
+            local ray = cam:ViewportPointToRay(mousePos.X, mousePos.Y)
+            local res = workspace:Raycast(ray.Origin, ray.Direction * 5000, params)
+            if res and res.Instance and res.Instance:IsDescendantOf(char) then
+                hitPlr, hitPart = _lockedPlayer, res.Instance
             end
         end
-        _trigHitPlr, _trigHitPart = hitPlr, hitPart
     end
-    local hitPlr, hitPart = _trigHitPlr, _trigHitPart
-    -- drop a stale cached target if its character/part went away
-    if hitPart and not hitPart.Parent then hitPlr, hitPart = nil, nil; _trigHitPlr, _trigHitPart = nil, nil end
     _trigCurrentPart = hitPart
 
     if TB_targetBox then
@@ -1554,24 +1530,17 @@ RunService.Heartbeat:Connect(function(dt)
     end
 
     if not TrigSettings.Enabled then return end
-    -- Tool Check: don't fire a click while we have no tool equipped
     if TrigSettings.ToolCheck and not lpHasTool() then return end
     if not hitPlr then return end
-    if _trigFiring then return end                          -- one click at a time
-    -- ClickDelay 0 -> still leave a tiny gap so we don't spam faster than the
-    -- game can register, which made it look like it only fired once
-    local minGap = math.max(TrigSettings.ClickDelay, 35)
-    if (tick() - _trigLastShot) * 1000 < minGap then return end
+    -- fire the instant the crosshair is on a bodypart, gated only by ClickDelay
+    if (tick() - _trigLastShot) * 1000 < TrigSettings.ClickDelay then return end
     _trigLastShot = tick()
-    _trigFiring   = true
-    -- proper press THEN release on separate frames: a same-frame down+up reads
-    -- as a single held press, so semi-auto guns only fired once until you moved
+    -- press then release on separate frames so semi-auto guns re-fire
     task.spawn(function()
         local vim = VirtualInputManager
         pcall(function() vim:SendMouseButtonEvent(0, 0, 0, true,  game, 0) end)
         task.wait()
         pcall(function() vim:SendMouseButtonEvent(0, 0, 0, false, game, 0) end)
-        _trigFiring = false
     end)
 end)
 end  -- end camlock + triggerbot scope
