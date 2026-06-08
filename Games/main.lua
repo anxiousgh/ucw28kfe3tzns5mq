@@ -602,9 +602,14 @@ regToggle(Misc, "StickyEmotes", "Emotes stay while moving", false, function(v)
     end
 end)
 
--- Animation presets: overwrite the Animate script's walk/run (+ idle) IDs.
--- The default Animate watches these and reloads, so it applies live. Presets
--- are mutually exclusive; re-applied on respawn; originals restored on off.
+-- ============================================================
+--  ANIMATION CHANGER  (own tab, below Misc)
+-- ============================================================
+-- Presets overwrite the Animate script's walk/run (+ idle) IDs. The default
+-- Animate watches these and reloads, so it applies live. Presets are mutually
+-- exclusive; re-applied on respawn; originals restored on off.
+local AnimTab = Window:NewTab("Animation Changer")
+AnimTab:NewSection("Walk / run")
 do
     local PRESETS = {
         dog = {
@@ -707,11 +712,11 @@ do
         if preset.fidgets then cwFidgetThread = task.spawn(cwFidgetLoop) end
     end
 
-    dogT = regToggle(Misc, "CustomWalk", "Dog walking animations", false, function(v)
+    dogT = regToggle(AnimTab, "CustomWalk", "Dog walking animations", false, function(v)
         if v then if slowT then slowT:Set(false) end; setPreset("dog")
         elseif active == "dog" then setPreset(nil) end
     end)
-    slowT = regToggle(Misc, "SlowWalk", "Slow walk anim", false, function(v)
+    slowT = regToggle(AnimTab, "SlowWalk", "Slow walk anim", false, function(v)
         if v then if dogT then dogT:Set(false) end; setPreset("slow")
         elseif active == "slow" then setPreset(nil) end
     end)
