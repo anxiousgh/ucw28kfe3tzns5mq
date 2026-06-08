@@ -622,10 +622,15 @@ do
             walk = "rbxassetid://82920886438316",
             run  = "rbxassetid://82920886438316",
         },
+        sad = {
+            walk = "rbxassetid://122248011313710",
+            run  = "rbxassetid://122248011313710",
+            idle = "rbxassetid://106148437094704",
+        },
     }
-    local active  = nil        -- "dog" | "slow" | nil
+    local active  = nil        -- "dog" | "slow" | "sad" | nil
     local cwSaved = {}         -- [Animation] = original AnimationId
-    local cwConn, cwFidgetThread, dogT, slowT
+    local cwConn, cwFidgetThread, dogT, slowT, sadT
 
     local function applyPreset(char, preset)
         local animate = char and char:FindFirstChild("Animate")
@@ -712,13 +717,23 @@ do
         if preset.fidgets then cwFidgetThread = task.spawn(cwFidgetLoop) end
     end
 
+    -- turn off every other preset toggle (mutual exclusivity)
+    local function offExcept(keep)
+        for _, t in ipairs({ dogT, slowT, sadT }) do
+            if t and t ~= keep then t:Set(false) end
+        end
+    end
     dogT = regToggle(AnimTab, "CustomWalk", "Dog walking animations", false, function(v)
-        if v then if slowT then slowT:Set(false) end; setPreset("dog")
+        if v then offExcept(dogT); setPreset("dog")
         elseif active == "dog" then setPreset(nil) end
     end)
     slowT = regToggle(AnimTab, "SlowWalk", "Slow walk anim", false, function(v)
-        if v then if dogT then dogT:Set(false) end; setPreset("slow")
+        if v then offExcept(slowT); setPreset("slow")
         elseif active == "slow" then setPreset(nil) end
+    end)
+    sadT = regToggle(AnimTab, "SadWalk", "Sad", false, function(v)
+        if v then offExcept(sadT); setPreset("sad")
+        elseif active == "sad" then setPreset(nil) end
     end)
 end
 
