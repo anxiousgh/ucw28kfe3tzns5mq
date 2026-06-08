@@ -602,24 +602,32 @@ regToggle(Misc, "StickyEmotes", "Emotes stay while moving", false, function(v)
     end
 end)
 
--- Dog walking animations: overwrite the Animate script's walk/run + idle
--- AnimationIds (the default Animate watches these and reloads, so it applies
--- live). Re-applies on respawn; restores the originals when toggled off.
+-- Animation presets: overwrite the Animate script's walk/run (+ idle) IDs.
+-- The default Animate watches these and reloads, so it applies live. Presets
+-- are mutually exclusive; re-applied on respawn; originals restored on off.
 do
-    local ANIMS = {
-        walk = "rbxassetid://103866486218951",
-        run  = "rbxassetid://103866486218951",
-        idle = "rbxassetid://80401449796551",
+    local PRESETS = {
+        dog = {
+            walk = "rbxassetid://103866486218951",
+            run  = "rbxassetid://103866486218951",
+            idle = "rbxassetid://80401449796551",
+            fidgets = true,
+        },
+        slow = {
+            walk = "rbxassetid://82920886438316",
+            run  = "rbxassetid://82920886438316",
+        },
     }
-    local cwOn     = false
-    local cwSaved  = {}        -- [Animation] = original AnimationId
-    local cwConn
+    local active  = nil        -- "dog" | "slow" | nil
+    local cwSaved = {}         -- [Animation] = original AnimationId
+    local cwConn, cwFidgetThread, dogT, slowT
 
-    local function cwApply(char)
+    local function applyPreset(char, preset)
         local animate = char and char:FindFirstChild("Animate")
-        if not animate then return end
-        for name, id in pairs(ANIMS) do
-            local f = animate:FindFirstChild(name)
+        if not animate or not preset then return end
+        for _, name in ipairs({ "walk", "run", "idle" }) do
+            local id = preset[name]
+            local f  = id and animate:FindFirstChild(name)
             if f then
                 for _, a in ipairs(f:GetChildren()) do
                     if a:IsA("Animation") then
@@ -637,13 +645,11 @@ do
         cwSaved = {}
     end
 
-    -- random idle "fidget" animations played once after a while of standing still
+    -- random idle "fidget" animations (dog preset only)
     local FIDGETS = {
         "rbxassetid://92972712226070", "rbxassetid://122475317803320",
         "rbxassetid://121179940665683", "rbxassetid://92913202939886",
     }
-    local cwFidgetThread
-
     local function playFidget(char, hum)
         local animator = hum:FindFirstChildOfClass("Animator")
         if not animator then return end
@@ -651,63 +657,63 @@ do
         anim.AnimationId = FIDGETS[math.random(1, #FIDGETS)]
         local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
         if not ok or not track then return end
-        pcall(function() track.Priority = Enum.AnimationPriority.Action end)  -- over the idle
+        pcall(function() track.Priority = Enum.AnimationPriority.Action end)
         track.Looped = false
         pcall(function() track:Play() end)
-        -- let it play until it ends, you move, or a safety timeout
         local t0 = os.clock()
-        while cwOn and track.IsPlaying do
+        while active == "dog" and track.IsPlaying do
             if hum.MoveDirection.Magnitude > 0.1 then break end
             if os.clock() - t0 > 12 then break end
             task.wait(0.1)
         end
         pcall(function() track:Stop(0.2) end)
     end
-
-    local function idleHum()   -- humanoid only while alive + standing still
+    local function idleHum()
         local char = LocalPlr.Character
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        if hum and hum.Health > 0 and hum.MoveDirection.Magnitude < 0.1 then
-            return hum, char
-        end
+        if hum and hum.Health > 0 and hum.MoveDirection.Magnitude < 0.1 then return hum, char end
         return nil
     end
     local function cwFidgetLoop()
-        while cwOn do
-            -- wait 1-60s of continuous idle (moving resets it), then fidget once
-            local target = math.random(1, 60)
+        while active == "dog" do
+            local target = math.random(1, 60)   -- 1-60s of continuous idle
             local acc = 0
-            while cwOn and acc < target do
+            while active == "dog" and acc < target do
                 task.wait(0.5)
                 if idleHum() then acc = acc + 0.5 else acc = 0 end
             end
-            if not cwOn then break end
+            if active ~= "dog" then break end
             local hum, char = idleHum()
             if hum then playFidget(char, hum) end
-            -- then a 60s timeout; ends early the moment you're not idle anymore
-            local t0 = os.clock()
-            while cwOn and (os.clock() - t0) < 60 do
+            local t0 = os.clock()             -- 60s timeout, ends early when not idle
+            while active == "dog" and (os.clock() - t0) < 60 do
                 task.wait(0.5)
                 if not idleHum() then break end
             end
         end
     end
 
-    regToggle(Misc, "CustomWalk", "Dog walking animations", false, function(v)
-        cwOn = v
-        if v then
-            cwApply(LocalPlr.Character)
-            if cwConn then cwConn:Disconnect() end
-            cwConn = LocalPlr.CharacterAdded:Connect(function(c)
-                if cwOn then task.wait(0.4); if cwOn then cwApply(c) end end
-            end)
-            if cwFidgetThread then pcall(task.cancel, cwFidgetThread) end
-            cwFidgetThread = task.spawn(cwFidgetLoop)
-        else
-            if cwConn then cwConn:Disconnect(); cwConn = nil end
-            if cwFidgetThread then pcall(task.cancel, cwFidgetThread); cwFidgetThread = nil end
-            cwRestore()
-        end
+    local function setPreset(name)
+        if cwConn then cwConn:Disconnect(); cwConn = nil end
+        if cwFidgetThread then pcall(task.cancel, cwFidgetThread); cwFidgetThread = nil end
+        cwRestore()
+        active = name
+        local preset = name and PRESETS[name]
+        if not preset then return end
+        applyPreset(LocalPlr.Character, preset)
+        cwConn = LocalPlr.CharacterAdded:Connect(function(c)
+            if active == name then task.wait(0.4); if active == name then applyPreset(c, preset) end end
+        end)
+        if preset.fidgets then cwFidgetThread = task.spawn(cwFidgetLoop) end
+    end
+
+    dogT = regToggle(Misc, "CustomWalk", "Dog walking animations", false, function(v)
+        if v then if slowT then slowT:Set(false) end; setPreset("dog")
+        elseif active == "dog" then setPreset(nil) end
+    end)
+    slowT = regToggle(Misc, "SlowWalk", "Slow walk anim", false, function(v)
+        if v then if dogT then dogT:Set(false) end; setPreset("slow")
+        elseif active == "slow" then setPreset(nil) end
     end)
 end
 
