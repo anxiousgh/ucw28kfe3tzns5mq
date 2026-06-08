@@ -602,33 +602,32 @@ regToggle(Misc, "StickyEmotes", "Emotes stay while moving", false, function(v)
     end
 end)
 
--- Custom walk/run animation: overwrite the Animate script's walk + run
+-- Dog walking animations: overwrite the Animate script's walk/run + idle
 -- AnimationIds (the default Animate watches these and reloads, so it applies
 -- live). Re-applies on respawn; restores the originals when toggled off.
 do
-    local WALK_ID  = "rbxassetid://103866486218951"
+    local ANIMS = {
+        walk = "rbxassetid://103866486218951",
+        run  = "rbxassetid://103866486218951",
+        idle = "rbxassetid://80401449796551",
+    }
     local cwOn     = false
     local cwSaved  = {}        -- [Animation] = original AnimationId
     local cwConn
 
-    local function cwTargets(char)
+    local function cwApply(char)
         local animate = char and char:FindFirstChild("Animate")
-        local out = {}
-        if not animate then return out end
-        for _, name in ipairs({ "walk", "run" }) do
+        if not animate then return end
+        for name, id in pairs(ANIMS) do
             local f = animate:FindFirstChild(name)
             if f then
                 for _, a in ipairs(f:GetChildren()) do
-                    if a:IsA("Animation") then out[#out + 1] = a end
+                    if a:IsA("Animation") then
+                        if cwSaved[a] == nil then cwSaved[a] = a.AnimationId end
+                        pcall(function() a.AnimationId = id end)
+                    end
                 end
             end
-        end
-        return out
-    end
-    local function cwApply(char)
-        for _, a in ipairs(cwTargets(char)) do
-            if cwSaved[a] == nil then cwSaved[a] = a.AnimationId end
-            pcall(function() a.AnimationId = WALK_ID end)
         end
     end
     local function cwRestore()
@@ -638,7 +637,7 @@ do
         cwSaved = {}
     end
 
-    regToggle(Misc, "CustomWalk", "Custom walk/run animation", false, function(v)
+    regToggle(Misc, "CustomWalk", "Dog walking animations", false, function(v)
         cwOn = v
         if v then
             cwApply(LocalPlr.Character)
