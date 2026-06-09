@@ -136,12 +136,20 @@ hook.games.prisonLife = (function()
     local plTracerThick    = 0.12
     local plTracerStyle    = "Standard"  -- Standard/Laser/Thin/Lightning/Plasma
     local plTrailOn        = false
+    -- cap concurrent impact effects: kill-aura auto-fire (esp. shotguns) can
+    -- otherwise spawn dozens of PointLights + emitters at once and freeze the
+    -- renderer. Counted for a fixed window then freed, so it can't leak.
+    local _plFxCount = 0
+    local _PL_FX_MAX = 40
 
     local function _plSpawnTracer(origin, hitPos)
         if not plTracerOn then return end
+        if _plFxCount >= _PL_FX_MAX then return end
         local dist = (hitPos - origin).Magnitude
         if dist < 0.5 then return end
         local dir = (hitPos - origin).Unit
+        _plFxCount = _plFxCount + 1
+        task.delay(1.2, function() _plFxCount = math.max(0, _plFxCount - 1) end)
 
         local function invis(pos)
             local p = Instance.new("Part")
@@ -868,7 +876,9 @@ hook.games.prisonLife = (function()
                 -- read FireRate from tool each tick
                 local t        = equippedTool()
                 local fireRate = (t and t:GetAttribute("FireRate")) or _auraIntervalFallback
-                task.wait(math.max(0.01, fireRate))
+                -- floor at 0.04s (~25/s) so a 0/missing FireRate can't spin the
+                -- loop at ~100/s and flood remotes + effects -> freeze
+                task.wait(math.max(0.04, fireRate))
             end
             auraThread = nil
         end)
