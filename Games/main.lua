@@ -422,11 +422,22 @@ regToggle(Visuals, "UnlockZoom", "Unlock zoom", false, function(v) if v then hoo
 Visuals:NewSection("Server position")
 do
     local RunSvc = game:GetService("RunService")
+    local SMOOTH = 16          -- glide speed toward the server position (higher = snappier)
     local serverVizOn = false
-    local clone
+    local clone, rootPart, baseCF
+    local cloneParts   = {}    -- { { real = <BasePart>, fake = <BasePart> }, ... }
+    local structConns  = {}
+    local rebuildQueued = false
 
+    local function clearStructConns()
+        for _, c in ipairs(structConns) do pcall(function() c:Disconnect() end) end
+        structConns = {}
+    end
     local function destroyClone()
+        clearStructConns()
+        cloneParts = {}
         if clone then clone:Destroy(); clone = nil end
+        rootPart, baseCF = nil, nil
     end
     local function highlight(model)
         local h = Instance.new("Highlight")
@@ -438,10 +449,30 @@ do
         h.Adornee             = model
         h.Parent              = model
     end
+    -- relative name-path of a descendant under its model root
+    local function relPath(inst, root)
+        local names = {}
+        while inst and inst ~= root do
+            table.insert(names, 1, inst.Name)
+            inst = inst.Parent
+        end
+        return names
+    end
+    local function resolve(root, names)
+        local cur = root
+        for _, n in ipairs(names) do
+            if not cur then return nil end
+            cur = cur:FindFirstChild(n)
+        end
+        return cur
+    end
+
+    local queueRebuild
     local function buildClone()
         destroyClone()
         local char = LocalPlr.Character
-        if not char then return end
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not char or not root then return end
         -- character models are often Archivable=false (can't be cloned);
         -- flip it on temporarily so :Clone() actually returns something
         local prevArch = char.Archivable
@@ -458,10 +489,27 @@ do
                     pcall(function() d:Destroy() end)
                 end
             end
+            -- pair every clone part with its live counterpart so we can copy
+            -- the exact limb pose (animations) + held tool handles each frame
+            cloneParts = {}
+            for _, d in ipairs(c:GetDescendants()) do
+                if d:IsA("BasePart") then
+                    local realPart = resolve(char, relPath(d, c))
+                    if realPart and realPart:IsA("BasePart") then
+                        cloneParts[#cloneParts + 1] = { real = realPart, fake = d }
+                    end
+                end
+            end
             c.Name = "_wh_serverpos"
             highlight(c)
             c.Parent = workspace
-            clone = c
+            clone, rootPart = c, root
+            baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+            -- equipping/removing a tool or accessory changes the rig -> rebuild
+            structConns = {
+                char.ChildAdded:Connect(queueRebuild),
+                char.ChildRemoved:Connect(queueRebuild),
+            }
             return
         end
         -- fallback: cloning blocked -> a simple bright marker part
@@ -471,7 +519,17 @@ do
         m.Material = Enum.Material.Neon; m.Color = Color3.fromRGB(0, 200, 255); m.Transparency = 0.3
         highlight(m)
         m.Parent = workspace
-        clone = m
+        clone, rootPart = m, root
+        baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+    end
+
+    queueRebuild = function()
+        if not serverVizOn or rebuildQueued then return end
+        rebuildQueued = true
+        task.delay(0.15, function()
+            rebuildQueued = false
+            if serverVizOn then buildClone() end
+        end)
     end
 
     regToggle(Visuals, "ServerPosViz", "Server position visualizer", false, function(v)
@@ -488,17 +546,32 @@ do
     LocalPlr.CharacterAdded:Connect(function()
         if serverVizOn then task.wait(0.4); if serverVizOn then buildClone() end end
     end)
-    RunSvc.Heartbeat:Connect(function()
+    RunSvc.RenderStepped:Connect(function(dt)
         if library.Unloaded then destroyClone(); return end
         if not serverVizOn then return end
-        local char = LocalPlr.Character
-        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        if not clone or not clone.Parent then buildClone() end
+        if not clone or not clone.Parent or not rootPart or not rootPart.Parent then
+            buildClone(); return
+        end
         -- server position from the RakNet tracker; fall back to live HRP
         -- until the first 0x1B packet is observed
-        local cf = (hook.serverPos and hook.serverPos.getCFrame()) or hrp.CFrame
-        if clone then pcall(function() clone:PivotTo(cf) end) end
+        local target = (hook.serverPos and hook.serverPos.getCFrame()) or rootPart.CFrame
+        -- glide the base toward the (discrete) server target so it flows
+        -- instead of snapping on every packet
+        local alpha = 1 - math.exp(-dt * SMOOTH)
+        baseCF = baseCF and baseCF:Lerp(target, alpha) or target
+        if #cloneParts > 0 then
+            -- reproduce every limb relative to the live root -> the clone
+            -- animates and holds tools exactly like you, parked at the server spot
+            local rootInv = rootPart.CFrame:Inverse()
+            for _, p in ipairs(cloneParts) do
+                local rp = p.real
+                if rp and rp.Parent then
+                    pcall(function() p.fake.CFrame = baseCF * (rootInv * rp.CFrame) end)
+                end
+            end
+        else
+            pcall(function() clone:PivotTo(baseCF) end)   -- fallback marker
+        end
     end)
 end
 
