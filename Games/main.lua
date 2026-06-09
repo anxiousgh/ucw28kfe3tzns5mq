@@ -424,10 +424,20 @@ do
     local RunSvc = game:GetService("RunService")
     local SMOOTH = 16          -- glide speed toward the server position (higher = snappier)
     local serverVizOn = false
-    local clone, rootPart, baseCF
+    local clone, rootPart, baseCF, hl
     local cloneParts   = {}    -- { { real = <BasePart>, fake = <BasePart> }, ... }
     local structConns  = {}
     local rebuildQueued = false
+
+    -- appearance (user-configurable)
+    local MATERIALS = {
+        Neon       = Enum.Material.Neon,
+        ForceField = Enum.Material.ForceField,
+        Glass      = Enum.Material.Glass,
+    }
+    local vizColor    = Color3.fromRGB(0, 200, 255)
+    local vizMaterial = "ForceField"
+    local vizTransp   = 0.4
 
     local function clearStructConns()
         for _, c in ipairs(structConns) do pcall(function() c:Disconnect() end) end
@@ -437,17 +447,43 @@ do
         clearStructConns()
         cloneParts = {}
         if clone then clone:Destroy(); clone = nil end
-        rootPart, baseCF = nil, nil
+        rootPart, baseCF, hl = nil, nil, nil
     end
     local function highlight(model)
         local h = Instance.new("Highlight")
-        h.FillColor           = Color3.fromRGB(0, 200, 255)
+        h.FillColor           = vizColor
         h.OutlineColor        = Color3.fromRGB(255, 255, 255)
         h.FillTransparency    = 0.5
         h.OutlineTransparency = 0
         h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop  -- visible through walls
         h.Adornee             = model
         h.Parent              = model
+        return h
+    end
+    -- push color / material / transparency onto the live clone
+    local function applyAppearance()
+        if not clone then return end
+        local mat = MATERIALS[vizMaterial] or Enum.Material.ForceField
+        if #cloneParts > 0 then
+            for _, p in ipairs(cloneParts) do
+                local part = p.fake
+                if part then
+                    part.Material = mat; part.Color = vizColor; part.Transparency = vizTransp
+                end
+            end
+        elseif clone:IsA("BasePart") then
+            clone.Material = mat; clone.Color = vizColor; clone.Transparency = vizTransp
+        end
+        if hl then hl.FillColor = vizColor end
+    end
+    -- first person ~ camera sitting inside the head
+    local camera = workspace.CurrentCamera
+    local function isFirstPerson()
+        camera = workspace.CurrentCamera or camera
+        local char = LocalPlr.Character
+        local head = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
+        if not head or not camera then return false end
+        return (camera.CFrame.Position - head.Position).Magnitude < 1.5
     end
     -- relative name-path of a descendant under its model root
     local function relPath(inst, root)
@@ -483,8 +519,6 @@ do
             for _, d in ipairs(c:GetDescendants()) do
                 if d:IsA("BasePart") then
                     d.Anchored = true; d.CanCollide = false; d.CanQuery = false; d.CastShadow = false
-                    d.Transparency = math.min(d.Transparency, 0.4)  -- ensure it's visible
-                    d.Material = Enum.Material.ForceField
                 elseif d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Humanoid") then
                     pcall(function() d:Destroy() end)
                 end
@@ -501,10 +535,11 @@ do
                 end
             end
             c.Name = "_wh_serverpos"
-            highlight(c)
+            hl = highlight(c)
             c.Parent = workspace
             clone, rootPart = c, root
             baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+            applyAppearance()
             -- equipping/removing a tool or accessory changes the rig -> rebuild
             structConns = {
                 char.ChildAdded:Connect(queueRebuild),
@@ -516,11 +551,11 @@ do
         local m = Instance.new("Part")
         m.Name = "_wh_serverpos"; m.Size = Vector3.new(2, 5, 1)
         m.Anchored = true; m.CanCollide = false; m.CanQuery = false; m.CastShadow = false
-        m.Material = Enum.Material.Neon; m.Color = Color3.fromRGB(0, 200, 255); m.Transparency = 0.3
-        highlight(m)
+        hl = highlight(m)
         m.Parent = workspace
         clone, rootPart = m, root
         baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+        applyAppearance()
     end
 
     queueRebuild = function()
@@ -543,15 +578,34 @@ do
             destroyClone()
         end
     end)
+    regColor(Visuals, "ServerPosColor", "Color", vizColor, function(c)
+        vizColor = c; applyAppearance()
+    end)
+    regDropdown(Visuals, "ServerPosMaterial", "Material", vizMaterial,
+        { "Neon", "ForceField", "Glass" }, false, function(v)
+            vizMaterial = v; applyAppearance()
+        end)
+    regSlider(Visuals, "ServerPosTransp", "Transparency", "%", { min = 0, max = 100, default = math.floor(vizTransp * 100) },
+        function(v) vizTransp = v / 100; applyAppearance() end)
+
     LocalPlr.CharacterAdded:Connect(function()
         if serverVizOn then task.wait(0.4); if serverVizOn then buildClone() end end
     end)
     RunSvc.RenderStepped:Connect(function(dt)
         if library.Unloaded then destroyClone(); return end
         if not serverVizOn then return end
-        if not clone or not clone.Parent or not rootPart or not rootPart.Parent then
-            buildClone(); return
+        if not clone then buildClone(); return end
+        -- hide it entirely while in first person
+        if isFirstPerson() then
+            if clone.Parent then clone.Parent = nil end
+            return
         end
+        if not clone.Parent then
+            -- we hid it (reattach) or the game removed it (rebuild)
+            pcall(function() clone.Parent = workspace end)
+            if not clone.Parent then buildClone(); return end
+        end
+        if not rootPart or not rootPart.Parent then buildClone(); return end
         -- server position from the RakNet tracker; fall back to live HRP
         -- until the first 0x1B packet is observed
         local target = (hook.serverPos and hook.serverPos.getCFrame()) or rootPart.CFrame

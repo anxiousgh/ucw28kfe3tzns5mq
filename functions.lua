@@ -3608,9 +3608,45 @@ F.serverPos = (function()
         return true
     end
 
+    -- watchdog: keep retrying the install until raknet is reachable (so it
+    -- doesn't depend on another feature like desync priming raknet first) and
+    -- re-assert the hook periodically in case something else cleared it.
+    local function startWatchdog()
+        if getgenv()._F_SERVERPOS_WATCHDOG then return end
+        getgenv()._F_SERVERPOS_WATCHDOG = true
+        task.spawn(function()
+            local lastReinstall = 0
+            while true do
+                if getgenv()._F_SERVERPOS_WANTED then
+                    if not getgenv()._F_SERVERPOS_INSTALLED then
+                        ensureHook()
+                    elseif tick() - lastReinstall >= 10 then
+                        lastReinstall = tick()
+                        local r = findRaknet()
+                        if r and r.add_send_hook and getgenv()._F_SERVERPOS_FN then
+                            pcall(function()
+                                if r.remove_send_hook then
+                                    r.remove_send_hook(getgenv()._F_SERVERPOS_FN)
+                                end
+                                r.add_send_hook(getgenv()._F_SERVERPOS_FN)
+                            end)
+                        end
+                    end
+                end
+                task.wait(1)
+            end
+        end)
+    end
+
     return {
-        -- install the observer hook; returns false if no raknet API
-        start       = function() return ensureHook() end,
+        -- install the observer hook; keeps retrying via the watchdog if raknet
+        -- isn't reachable yet. returns true if it installed immediately.
+        start = function()
+            getgenv()._F_SERVERPOS_WANTED = true
+            startWatchdog()
+            return ensureHook()
+        end,
+        stop        = function() getgenv()._F_SERVERPOS_WANTED = false end,
         isAvailable = function() return findRaknet() ~= nil end,
         -- last position the server received; nil until a 0x1B is seen.
         getCFrame   = function() return getgenv()._F_SERVERPOS_CF end,
