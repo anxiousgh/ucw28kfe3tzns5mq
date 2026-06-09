@@ -3608,30 +3608,17 @@ F.serverPos = (function()
         return true
     end
 
-    -- watchdog: keep retrying the install until raknet is reachable (so it
-    -- doesn't depend on another feature like desync priming raknet first) and
-    -- re-assert the hook periodically in case something else cleared it.
+    -- watchdog: keep retrying the install (once per second) until raknet is
+    -- reachable, so it doesn't depend on another feature (e.g. desync) priming
+    -- raknet first. Stops retrying once installed -- never re-adds the hook, so
+    -- the observer can't stack and pile up per-packet work.
     local function startWatchdog()
         if getgenv()._F_SERVERPOS_WATCHDOG then return end
         getgenv()._F_SERVERPOS_WATCHDOG = true
         task.spawn(function()
-            local lastReinstall = 0
             while true do
-                if getgenv()._F_SERVERPOS_WANTED then
-                    if not getgenv()._F_SERVERPOS_INSTALLED then
-                        ensureHook()
-                    elseif tick() - lastReinstall >= 10 then
-                        lastReinstall = tick()
-                        local r = findRaknet()
-                        if r and r.add_send_hook and getgenv()._F_SERVERPOS_FN then
-                            pcall(function()
-                                if r.remove_send_hook then
-                                    r.remove_send_hook(getgenv()._F_SERVERPOS_FN)
-                                end
-                                r.add_send_hook(getgenv()._F_SERVERPOS_FN)
-                            end)
-                        end
-                    end
+                if getgenv()._F_SERVERPOS_WANTED and not getgenv()._F_SERVERPOS_INSTALLED then
+                    ensureHook()
                 end
                 task.wait(1)
             end

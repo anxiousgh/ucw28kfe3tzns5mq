@@ -540,10 +540,17 @@ do
             clone, rootPart = c, root
             baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
             applyAppearance()
-            -- equipping/removing a tool or accessory changes the rig -> rebuild
+            -- rebuild ONLY when a tool/accessory is actually added or removed.
+            -- (connecting to every child change re-clones the whole rig many
+            -- times a second in games that churn character children -> freeze.)
+            local function onChild(child)
+                if child and (child:IsA("Tool") or child:IsA("Accessory")) then
+                    queueRebuild()
+                end
+            end
             structConns = {
-                char.ChildAdded:Connect(queueRebuild),
-                char.ChildRemoved:Connect(queueRebuild),
+                char.ChildAdded:Connect(onChild),
+                char.ChildRemoved:Connect(onChild),
             }
             return
         end
@@ -561,7 +568,7 @@ do
     queueRebuild = function()
         if not serverVizOn or rebuildQueued then return end
         rebuildQueued = true
-        task.delay(0.15, function()
+        task.delay(0.35, function()
             rebuildQueued = false
             if serverVizOn then buildClone() end
         end)
@@ -617,12 +624,14 @@ do
             -- reproduce every limb relative to the live root -> the clone
             -- animates and holds tools exactly like you, parked at the server spot
             local rootInv = rootPart.CFrame:Inverse()
-            for _, p in ipairs(cloneParts) do
-                local rp = p.real
-                if rp and rp.Parent then
-                    pcall(function() p.fake.CFrame = baseCF * (rootInv * rp.CFrame) end)
+            pcall(function()
+                for _, p in ipairs(cloneParts) do
+                    local rp = p.real
+                    if rp and rp.Parent then
+                        p.fake.CFrame = baseCF * (rootInv * rp.CFrame)
+                    end
                 end
-            end
+            end)
         else
             pcall(function() clone:PivotTo(baseCF) end)   -- fallback marker
         end
