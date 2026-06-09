@@ -450,6 +450,8 @@ do
     local cloneParts   = {}    -- { { real = <BasePart>, fake = <BasePart> }, ... }
     local structConns  = {}
     local rebuildQueued = false
+    local lastBuild     = 0    -- rate-limit rebuilds so a vanished clone can't
+    local BUILD_COOLDOWN = 0.5 -- re-clone the whole rig every frame -> freeze
 
     -- appearance (user-configurable)
     local MATERIALS = {
@@ -460,6 +462,11 @@ do
     local vizColor    = Color3.fromRGB(0, 200, 255)
     local vizMaterial = "ForceField"
     local vizTransp   = 0.4
+
+    -- park the clone under the Camera, not workspace: it still renders in 3D
+    -- but game scripts/anticheats that sweep workspace children for stray
+    -- models won't find (and delete) it -> no per-frame rebuild freeze.
+    local function vizParent() return workspace.CurrentCamera or workspace end
 
     local function clearStructConns()
         for _, c in ipairs(structConns) do pcall(function() c:Disconnect() end) end
@@ -531,7 +538,12 @@ do
     end
 
     local queueRebuild
-    local function buildClone()
+    -- force=true bypasses the cooldown (toggle on / respawn). Without it, a
+    -- clone that keeps getting removed (game cleanup, anticheat) can only
+    -- trigger a rebuild every BUILD_COOLDOWN s instead of every frame.
+    local function buildClone(force)
+        if not force and (tick() - lastBuild) < BUILD_COOLDOWN then return end
+        lastBuild = tick()
         destroyClone()
         local char = LocalPlr.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -571,7 +583,7 @@ do
             end
             c.Name = "_wh_serverpos"
             hl = highlight(c)
-            c.Parent = workspace
+            c.Parent = vizParent()
             clone, rootPart = c, root
             baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
             applyAppearance()
@@ -594,7 +606,7 @@ do
         m.Name = "_wh_serverpos"; m.Size = Vector3.new(2, 5, 1)
         m.Anchored = true; m.CanCollide = false; m.CanQuery = false; m.CastShadow = false
         hl = highlight(m)
-        m.Parent = workspace
+        m.Parent = vizParent()
         clone, rootPart = m, root
         baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
         applyAppearance()
@@ -615,7 +627,7 @@ do
             if hook.serverPos and not hook.serverPos.start() then
                 notify("Server pos needs a RakNet-capable executor", 4, "alert")
             end
-            buildClone()
+            buildClone(true)
         else
             destroyClone()
         end
@@ -631,7 +643,7 @@ do
         function(v) vizTransp = v / 100; applyAppearance() end)
 
     LocalPlr.CharacterAdded:Connect(function()
-        if serverVizOn then task.wait(0.4); if serverVizOn then buildClone() end end
+        if serverVizOn then task.wait(0.4); if serverVizOn then buildClone(true) end end
     end)
     RunSvc.RenderStepped:Connect(function(dt)
         if library.Unloaded then destroyClone(); return end
@@ -644,7 +656,7 @@ do
         end
         if not clone.Parent then
             -- we hid it (reattach) or the game removed it (rebuild)
-            pcall(function() clone.Parent = workspace end)
+            pcall(function() clone.Parent = vizParent() end)
             if not clone.Parent then buildClone(); return end
         end
         if not rootPart or not rootPart.Parent then buildClone(); return end
