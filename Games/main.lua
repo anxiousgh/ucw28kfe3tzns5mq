@@ -470,6 +470,12 @@ do
     -- but game scripts/anticheats that sweep workspace children for stray
     -- models won't find (and delete) it -> no per-frame rebuild freeze.
     local function vizParent() return workspace.CurrentCamera or workspace end
+    -- random instance name so disguised clone parts don't match Head/Torso/etc
+    local function randName()
+        local s = ""
+        for _ = 1, math.random(6, 10) do s = s .. string.char(math.random(97, 122)) end
+        return s
+    end
 
     local function clearStructConns()
         for _, c in ipairs(structConns) do pcall(function() c:Disconnect() end) end
@@ -585,7 +591,26 @@ do
                     end
                 end
             end
-            c.Name = "_wh_serverpos"
+            -- DISGUISE so the game's anticheat doesn't read it as a player rig:
+            -- 1) flatten every part up to the model root (out of Accessory/Tool
+            --    wrappers and sub-models)
+            for _, d in ipairs(c:GetDescendants()) do
+                if d:IsA("BasePart") and d.Parent ~= c then
+                    pcall(function() d.Parent = c end)
+                end
+            end
+            -- 2) drop everything that isn't a part or its mesh: the Humanoid,
+            --    Motor6D skeleton, attachments, accessory/tool wrappers, values
+            for _, d in ipairs(c:GetDescendants()) do
+                if not (d:IsA("BasePart") or d:IsA("DataModelMesh")) then
+                    pcall(function() d:Destroy() end)
+                end
+            end
+            -- 3) random names -> nothing matches Head / HumanoidRootPart / etc
+            c.Name = randName()
+            for _, d in ipairs(c:GetChildren()) do
+                if d:IsA("BasePart") then d.Name = randName() end
+            end
             hl = highlight(c)
             c.Parent = vizParent()
             clone, rootPart = c, root
