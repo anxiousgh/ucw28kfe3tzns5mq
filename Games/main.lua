@@ -520,10 +520,18 @@ do
     local camera = workspace.CurrentCamera
     local function isFirstPerson()
         camera = workspace.CurrentCamera or camera
+        if not camera then return false end
+        -- locked first person (some games force this)
+        if LocalPlr.CameraMode == Enum.CameraMode.LockFirstPerson then return true end
         local char = LocalPlr.Character
-        local head = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
-        if not head or not camera then return false end
-        return (camera.CFrame.Position - head.Position).Magnitude < 1.5
+        local head = char and char:FindFirstChild("Head")
+        -- Roblox blanks the head in first person -> a reliable signal
+        if head and head.LocalTransparencyModifier >= 1 then return true end
+        local ref = head or (char and char:FindFirstChild("HumanoidRootPart"))
+        if not ref then return false end
+        -- otherwise fall back to camera-near-head distance (head sits ~1.5 over HRP)
+        local limit = head and 2.5 or 3.5
+        return (camera.CFrame.Position - ref.Position).Magnitude < limit
     end
     -- relative name-path of a descendant under its model root
     local function relPath(inst, root)
