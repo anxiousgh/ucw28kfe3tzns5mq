@@ -2298,21 +2298,34 @@ hook.games.hoodCustoms.knifeBot = (function()
             local tHrp = getTargetHRP()
             if not tHrp then return end
 
+            local tPos = tHrp.Position
+            -- bail on a glitched / mid-teleport target at NaN/inf/insane coords:
+            -- feeding those into hrp.CFrame hard-freezes the client. (v ~= v is
+            -- true only for NaN; Magnitude is huge for inf.)
+            if tPos ~= tPos or tPos.Magnitude > 1e6 then return end
+
             local pos
             if orbitActive then
                 orbitAngle = (orbitAngle + orbitSpeed * dt) % 360
                 local rad = math.rad(orbitAngle)
-                pos = tHrp.Position + Vector3.new(math.cos(rad), 0, math.sin(rad)) * attachDistance
+                pos = tPos + Vector3.new(math.cos(rad), 0, math.sin(rad)) * attachDistance
             else
                 -- snap behind the target (so the knife swing arc lands)
                 local forward = tHrp.CFrame.LookVector
-                pos = tHrp.Position - forward * attachDistance
+                pos = tPos - forward * attachDistance
             end
-            -- guard against a degenerate look CFrame (pos == target) which
-            -- produces NaN and can hard-freeze the client
-            if (pos - tHrp.Position).Magnitude >= 0.5 then
+            -- clamp how far we jump in one frame: a single huge teleport both
+            -- trips HC's anticheat and can glitch physics. Far targets are
+            -- reached over a few frames instead of one map-crossing jump.
+            local cur  = hrp.Position
+            local move = pos - cur
+            local MAX_STEP = 60
+            if move.Magnitude > MAX_STEP then pos = cur + move.Unit * MAX_STEP end
+            -- guard against a degenerate look CFrame (pos == target / NaN), which
+            -- can also hard-freeze the client
+            if pos == pos and (pos - tPos).Magnitude >= 0.5 then
                 pcall(function()
-                    hrp.CFrame = CFrame.new(pos, tHrp.Position)
+                    hrp.CFrame = CFrame.new(pos, tPos)
                 end)
             end
         end)
