@@ -308,10 +308,10 @@ fakeLagT = regToggle(FakeLag, "FakeLagEnabled", "Enable fake lag", false, functi
     end
 end)
 fakeLagT:AddKeybind(Enum.KeyCode.H, "Fake Lag Toggle")
--- how big the lag is: ms of withheld movement before it snaps (bigger = bigger jump)
-regSlider(FakeLag, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 2000, default = hook.fakeLag.getAmount() },
+-- how big the lag is: ms each position update is delayed before it's re-sent
+regSlider(FakeLag, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, default = hook.fakeLag.getAmount() },
     function(v) hook.fakeLag.setAmount(v) end)
-FakeLag:NewLabel("Higher = bigger rubber-band teleport to other players.", "left")
+FakeLag:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
 
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 

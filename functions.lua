@@ -3640,10 +3640,12 @@ F.serverPos = (function()
     }
 end)()
 
---  FAKE LAG  (pulsed lagswitch)
--- Periodically withholds outbound physics packets (0x1B) for a "hold" window
--- then lets them through, so to everyone else you rubber-band/teleport like a
--- laggy player. The hold window is the "size" of the lag -- bigger = bigger jump.
+--  FAKE LAG  (true packet delay -- NOT a lagswitch)
+-- Holds each outbound physics packet (0x1B) back with packet:Block() and
+-- re-sends the exact same payload via raknet.send after a fixed delay. Nothing
+-- is dropped -- your replication keeps flowing, it just arrives late, so you sit
+-- a constant amount of time behind on everyone else's screen. The delay (ms) is
+-- the "size" of the lag: bigger = further in the past.
 F.fakeLag = (function()
     local function findRaknet()
         local r = rawget(getgenv(), "raknet")
@@ -3652,72 +3654,63 @@ F.fakeLag = (function()
         if ok and val then return val end
         return nil
     end
+    -- needs raknet.send to re-emit the held packets, not just a send hook
+    local function capable()
+        local r = findRaknet()
+        return r ~= nil and r.add_send_hook ~= nil and r.send ~= nil
+    end
 
     local function ensureHook()
         if getgenv()._F_FAKELAG_INSTALLED then return true end
         local r = findRaknet()
-        if not r or not r.add_send_hook then return false end
+        if not r or not r.add_send_hook or not r.send then return false end
         getgenv()._F_FAKELAG_INSTALLED = true
         getgenv()._F_FAKELAG_FN = function(packet)
-            if not getgenv()._F_FAKELAG_BLOCKING then return end
-            if packet.PacketId == 0x1B then
-                pcall(function() packet:SetCanBeSent(false) end)
-                pcall(function() packet:Drop() end)
-                pcall(function() packet:Block() end)
-                pcall(function() packet:Ignore() end)
-                return false
-            end
+            if not getgenv()._F_FAKELAG_WANTED then return end
+            -- our own delayed re-send coming back through the hook: let it pass
+            if getgenv()._F_FAKELAG_PASS then return end
+            if packet.PacketId ~= 0x1B then return end
+            -- snapshot the packet. AsString is an immutable byte string, so it's
+            -- safe to stash and replay later without aliasing the live buffer.
+            local ok, data = pcall(function() return packet.AsString end)
+            if not ok or type(data) ~= "string" then return end  -- can't capture -> send as normal
+            local prio = packet.Priority
+            local rel  = packet.Reliability
+            local chan = packet.OrderingChannel
+            pcall(function() packet:Block() end)                 -- hold the original back
+            local gap = (getgenv()._F_FAKELAG_MS or 200) / 1000
+            task.delay(gap, function()
+                if not getgenv()._F_FAKELAG_WANTED then return end
+                -- PASS lets this re-send skip the hook (raknet.send fires it
+                -- synchronously through the same send pipeline)
+                getgenv()._F_FAKELAG_PASS = true
+                pcall(function() r.send(data, prio, rel, chan) end)
+                getgenv()._F_FAKELAG_PASS = false
+            end)
         end
         pcall(function() r.add_send_hook(getgenv()._F_FAKELAG_FN) end)
         return true
     end
 
-    local active  = false
-    local HOLD_MS = 250        -- block window; bigger = bigger lag spike
-    local RELEASE = 0.07       -- brief release so one update gets through
-
-    local function waitWhile(sec)
-        local t0 = tick()
-        while getgenv()._F_FAKELAG_WANTED and tick() - t0 < sec do task.wait() end
-    end
-    local function loop()
-        while getgenv()._F_FAKELAG_WANTED do
-            -- block: accumulate desync
-            getgenv()._F_FAKELAG_BLOCKING   = true
-            getgenv()._F_LAGSWITCH_BLOCKING = true   -- so serverPos freezes correctly
-            waitWhile(math.max(0.02, HOLD_MS / 1000))
-            -- release: let position resync
-            getgenv()._F_FAKELAG_BLOCKING   = false
-            getgenv()._F_LAGSWITCH_BLOCKING = false
-            waitWhile(RELEASE)
-        end
-        getgenv()._F_FAKELAG_BLOCKING   = false
-        getgenv()._F_LAGSWITCH_BLOCKING = false
-    end
-
+    local active = false
     return {
         start = function()
             if not ensureHook() then return false end
             active = true
+            getgenv()._F_FAKELAG_PASS   = false
             getgenv()._F_FAKELAG_WANTED = true
-            -- guard against stacking a second loop on re-inject
-            if not getgenv()._F_FAKELAG_LOOP then
-                getgenv()._F_FAKELAG_LOOP = true
-                task.spawn(function() loop(); getgenv()._F_FAKELAG_LOOP = false end)
-            end
             return true
         end,
         stop = function()
             active = false
-            getgenv()._F_FAKELAG_WANTED     = false
-            getgenv()._F_FAKELAG_BLOCKING   = false
-            getgenv()._F_LAGSWITCH_BLOCKING = false
+            getgenv()._F_FAKELAG_WANTED = false
+            getgenv()._F_FAKELAG_PASS   = false
         end,
         isActive          = function() return active end,
-        isRaknetAvailable = function() return findRaknet() ~= nil end,
-        -- "size" of the lag, in ms of withheld replication
-        setAmount = function(ms) HOLD_MS = math.clamp(tonumber(ms) or 250, 20, 2000) end,
-        getAmount = function() return HOLD_MS end,
+        isRaknetAvailable = capable,
+        -- "size" of the lag = how long each update is held back (ms)
+        setAmount = function(ms) getgenv()._F_FAKELAG_MS = math.clamp(tonumber(ms) or 200, 20, 1000) end,
+        getAmount = function() return getgenv()._F_FAKELAG_MS or 200 end,
     }
 end)()
 
