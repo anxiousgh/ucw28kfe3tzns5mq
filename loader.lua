@@ -8,6 +8,21 @@
 --    loadstring(game:HttpGet("https://raw.githubusercontent.com/anxiousgh/ucw28kfe3tzns5mq/main/loader.lua"))()
 -- ============================================================
 
+-- ---------- single-instance guard ----------
+-- Don't let witherhook run twice in the same session -- a second execution
+-- would stack duplicate GUIs, hooks and loops (and can crash/lag the game).
+-- Re-execution is allowed again once the previous instance is unloaded.
+if getgenv then
+    local g = getgenv()
+    local prev = g.WITHERHOOK
+    if prev and prev.lib and not prev.lib.Unloaded then
+        pcall(function() prev.notif:Notify("witherhook is already loaded", 4, "alert") end)
+        warn("[witherhook] already loaded - ignoring duplicate execution")
+        return
+    end
+    g.WITHERHOOK = { lib = false, notif = false }
+end
+
 -- ---------- config ----------
 local OWNER  = "anxiousgh"
 local REPO   = "ucw28kfe3tzns5mq"
@@ -80,6 +95,11 @@ end)()
 
 -- ---------- notifications + intro ----------
 local Notif = library:InitNotifications()
+-- register this instance so a later execution can detect we're already running
+if getgenv then
+    local g = getgenv()
+    if g.WITHERHOOK then g.WITHERHOOK.lib, g.WITHERHOOK.notif = library, Notif end
+end
 Notif:Notify("witherhook loading...", 4, "information")
 
 library:Introduction()
