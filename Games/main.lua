@@ -610,7 +610,7 @@ do
             hl = highlight(c)
             c.Parent = vizParent()
             clone, rootPart = c, root
-            baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+            baseCF = nil   -- smoothed desync offset; seeded on the first frame
             applyAppearance()
             -- rebuild ONLY when a tool/accessory is actually added or removed.
             -- (connecting to every child change re-clones the whole rig many
@@ -633,7 +633,7 @@ do
         hl = highlight(m)
         m.Parent = vizParent()
         clone, rootPart = m, root
-        baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+        baseCF = nil   -- smoothed desync offset; seeded on the first frame
         applyAppearance()
     end
 
@@ -685,27 +685,28 @@ do
             if not clone.Parent then buildClone(); return end
         end
         if not rootPart or not rootPart.Parent then buildClone(); return end
-        -- server position from the RakNet tracker; fall back to live HRP
-        -- until the first 0x1B packet is observed
-        local target = (hook.serverPos and hook.serverPos.getCFrame()) or rootPart.CFrame
-        -- glide the base toward the (discrete) server target so it flows
-        -- instead of snapping on every packet
+        -- Work in terms of the desync OFFSET (server-vs-real) rather than the raw
+        -- server position. The offset changes slowly, so smoothing it lets the
+        -- clone ride your live, 60Hz body instead of chasing the discrete server
+        -- samples each frame -- which is what made it jiggle.
+        local realRoot = rootPart.CFrame
+        local server   = (hook.serverPos and hook.serverPos.getCFrame()) or realRoot
+        local targetOffset = server * realRoot:Inverse()
         local alpha = 1 - math.exp(-dt * SMOOTH)
-        baseCF = baseCF and baseCF:Lerp(target, alpha) or target
+        baseCF = baseCF and baseCF:Lerp(targetOffset, alpha) or targetOffset
         if #cloneParts > 0 then
-            -- reproduce every limb relative to the live root -> the clone
-            -- animates and holds tools exactly like you, parked at the server spot
-            local rootInv = rootPart.CFrame:Inverse()
+            -- each clone part = your real part with the smoothed offset applied,
+            -- so it animates/holds tools exactly like you (no internal wobble)
             pcall(function()
                 for _, p in ipairs(cloneParts) do
                     local rp = p.real
                     if rp and rp.Parent then
-                        p.fake.CFrame = baseCF * (rootInv * rp.CFrame)
+                        p.fake.CFrame = baseCF * rp.CFrame
                     end
                 end
             end)
         else
-            pcall(function() clone:PivotTo(baseCF) end)   -- fallback marker
+            pcall(function() clone:PivotTo(baseCF * realRoot) end)   -- fallback marker
         end
     end)
 end
