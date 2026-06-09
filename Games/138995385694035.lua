@@ -1201,6 +1201,8 @@ hook.games.hoodCustoms.godmode = (function()
     local FREEZE_T   = 0.1265
 
     local track, hbConn, animConn, charConn
+    local trackHum            -- humanoid `track` was loaded on (reload only on respawn)
+    local animHum             -- humanoid `animConn` is bound to
     local lastArmAt = 0       -- re-arm throttle (HC fires AnimationPlayed many times/sec)
     local lastListenAt = 0    -- listener throttle (don't even schedule redundant task.delays)
 
@@ -1211,25 +1213,28 @@ hook.games.hoodCustoms.godmode = (function()
     end
 
     local function killTrack()
-        if hbConn   then hbConn:Disconnect();   hbConn   = nil end
-        if animConn then animConn:Disconnect(); animConn = nil end
         if track then
             pcall(function() track:Stop() end)
             pcall(function() track:Destroy() end)
             track = nil
         end
+        trackHum = nil
+    end
+    -- full teardown: connections + track. Used on stop / when godmode goes off.
+    local function teardown()
+        if hbConn   then hbConn:Disconnect();   hbConn   = nil end
+        if animConn then animConn:Disconnect(); animConn = nil end
+        animHum = nil
+        killTrack()
     end
 
     -- declared forward so animConn can re-call after a delay.
     local arm
     arm = function()
         if not G.hcGmActive then return end
-        -- Re-arm throttle. HC fires AnimationPlayed many times per
-        -- second (walk, idle, sway, equip ...) and each fire would
-        -- otherwise rebuild the track + both connections + the
-        -- limb-void setup. Cap to once per 150ms - plenty fast to
-        -- re-grab godmode after HC interrupts the emote, cheap
-        -- enough that the game doesn't melt.
+        -- Re-arm throttle. HC fires AnimationPlayed many times per second; cap
+        -- to once per 150ms - fast enough to re-grab godmode, cheap enough that
+        -- the game doesn't melt.
         local now = tick()
         if now - lastArmAt < 0.15 then return end
         lastArmAt = now
@@ -1237,54 +1242,63 @@ hook.games.hoodCustoms.godmode = (function()
         local hum = getHumanoid()
         if not hum then return end
 
-        killTrack()
+        -- Load the emote ONCE per humanoid (respawn gives a fresh one). The old
+        -- code re-ran LoadAnimation + recreated both connections on EVERY re-arm
+        -- (~7x/sec under HC's animation spam) - that was the lag. A re-arm now
+        -- just replays + refreezes the track we already have.
+        if not track or trackHum ~= hum then
+            killTrack()
+            local anim = Instance.new("Animation")
+            anim.AnimationId = EMOTE_ID
+            local ok, newTrack = pcall(function() return hum:LoadAnimation(anim) end)
+            if not ok or not newTrack then return end
+            track    = newTrack
+            trackHum = hum
+            -- top priority so HC's own animations can't blend our pose out;
+            -- this alone cuts how often we have to re-arm.
+            pcall(function() track.Priority = Enum.AnimationPriority.Action4 end)
+        end
 
-        local anim = Instance.new("Animation")
-        anim.AnimationId = EMOTE_ID
-        local ok, newTrack = pcall(function() return hum:LoadAnimation(anim) end)
-        if not ok or not newTrack then return end
-        track = newTrack
-        pcall(function() track:Play(0, 1, 1) end)
-
-        -- Every Heartbeat: hold the animation at the godmode frame.
-        -- AdjustSpeed(0) freezes the play head; setting TimePosition
-        -- back to FREEZE_T defends against any external nudge.
-        --
-        -- Cheap-path: once the track is paused at FREEZE_T, the
-        -- per-frame cost is just one TimePosition read + a compare.
-        -- We only write when the position has actually drifted -
-        -- writing TimePosition forces a full rig re-pose, which is
-        -- what was tanking FPS when stacked on the rest of the
-        -- executor's load. Same logic for Speed.
-        hbConn = RunService.Heartbeat:Connect(function()
-            if not G.hcGmActive then killTrack(); return end
-            if not track then return end
-            local ok, tp = pcall(function() return track.TimePosition end)
-            if ok and math.abs(tp - FREEZE_T) > 0.001 then
-                pcall(function() track.TimePosition = FREEZE_T end)
-            end
-            local ok2, sp = pcall(function() return track.Speed end)
-            if ok2 and sp ~= 0 then
-                pcall(function() track:AdjustSpeed(0) end)
-            end
+        -- (re)assert the frozen godmode pose
+        pcall(function()
+            if not track.IsPlaying then track:Play(0, 1, 1) end
+            track.TimePosition = FREEZE_T
+            track:AdjustSpeed(0)
         end)
 
-        -- HC plays its own animations (equip, move, shoot, etc.).
-        -- Whenever a NEW animation starts, our track loses priority
-        -- and the godmode breaks - so re-arm shortly after.
-        --
-        -- Throttle the LISTENER itself, not just arm(): without this
-        -- we still queue a task.delay() for every fire (30+/sec from
-        -- HC), and each scheduled task allocates a closure even if
-        -- the eventual arm() call hits the throttle and returns.
-        animConn = hum.AnimationPlayed:Connect(function(newAnim)
-            if not G.hcGmActive then return end
-            if not track or newAnim == track then return end
-            local now = tick()
-            if now - lastListenAt < 0.1 then return end
-            lastListenAt = now
-            task.delay(0.02 + math.random() * 0.03, arm)
-        end)
+        -- Keep-frozen Heartbeat: created ONCE, reused across re-arms. Cheap path
+        -- - only writes TimePosition (a full rig re-pose) when it actually
+        -- drifts, which with Action4 priority it rarely does.
+        if not hbConn then
+            hbConn = RunService.Heartbeat:Connect(function()
+                if not G.hcGmActive then teardown(); return end
+                if not track then return end
+                local ok, tp = pcall(function() return track.TimePosition end)
+                if ok and math.abs(tp - FREEZE_T) > 0.001 then
+                    pcall(function() track.TimePosition = FREEZE_T end)
+                end
+                local ok2, sp = pcall(function() return track.Speed end)
+                if ok2 and sp ~= 0 then
+                    pcall(function() track:AdjustSpeed(0) end)
+                end
+            end)
+        end
+
+        -- Re-arm when HC starts another animation. Bound ONCE per humanoid
+        -- (rebound on respawn). Listener itself is throttled so we don't even
+        -- schedule a task.delay for every one of HC's 30+/sec fires.
+        if not animConn or animHum ~= hum then
+            if animConn then animConn:Disconnect() end
+            animHum  = hum
+            animConn = hum.AnimationPlayed:Connect(function(newAnim)
+                if not G.hcGmActive then return end
+                if not track or newAnim == track then return end
+                local n = tick()
+                if n - lastListenAt < 0.1 then return end
+                lastListenAt = n
+                task.delay(0.02 + math.random() * 0.03, arm)
+            end)
+        end
     end
 
     return makeToggle(
@@ -1305,7 +1319,7 @@ hook.games.hoodCustoms.godmode = (function()
         end,
         function()
             G.hcGmActive = false
-            killTrack()
+            teardown()
             if charConn then charConn:Disconnect(); charConn = nil end
         end,
         "hcGmActive"
