@@ -474,7 +474,12 @@ do
         elseif clone:IsA("BasePart") then
             clone.Material = mat; clone.Color = vizColor; clone.Transparency = vizTransp
         end
-        if hl then hl.FillColor = vizColor end
+        if hl then
+            hl.FillColor = vizColor
+            -- neon is self-lit and bright; the highlight fill just paints over it,
+            -- so turn the overlay off for neon and let the raw material show
+            hl.Enabled = (vizMaterial ~= "Neon")
+        end
     end
     -- first person ~ camera sitting inside the head
     local camera = workspace.CurrentCamera
@@ -519,7 +524,15 @@ do
             for _, d in ipairs(c:GetDescendants()) do
                 if d:IsA("BasePart") then
                     d.Anchored = true; d.CanCollide = false; d.CanQuery = false; d.CastShadow = false
-                elseif d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Humanoid") then
+                    -- mesh textures sit on top of the material -> clear them
+                    if d:IsA("MeshPart") then pcall(function() d.TextureID = "" end) end
+                elseif d:IsA("SpecialMesh") then
+                    pcall(function() d.TextureId = ""; d.VertexColor = Vector3.new(1, 1, 1) end)
+                -- decals, clothing, PBR surfaces and scripts all hide/override the
+                -- material; strip them so the chosen look shows on every part (hair too)
+                elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SurfaceAppearance")
+                    or d:IsA("Shirt") or d:IsA("Pants") or d:IsA("ShirtGraphic")
+                    or d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Humanoid") then
                     pcall(function() d:Destroy() end)
                 end
             end
