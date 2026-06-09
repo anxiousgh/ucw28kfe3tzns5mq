@@ -3660,7 +3660,8 @@ F.fakeLag = (function()
         return r ~= nil and r.add_send_hook ~= nil and r.send ~= nil
     end
 
-    getgenv()._F_FAKELAG_QUEUE = getgenv()._F_FAKELAG_QUEUE or {}
+    getgenv()._F_FAKELAG_QUEUE   = getgenv()._F_FAKELAG_QUEUE   or {}
+    getgenv()._F_FAKELAG_PENDING = getgenv()._F_FAKELAG_PENDING or {}  -- [payload] = replays in flight
 
     local function ensureHook()
         if getgenv()._F_FAKELAG_INSTALLED then return true end
@@ -3669,13 +3670,23 @@ F.fakeLag = (function()
         getgenv()._F_FAKELAG_INSTALLED = true
         getgenv()._F_FAKELAG_FN = function(packet)
             if not getgenv()._F_FAKELAG_WANTED then return end
-            -- our own delayed re-send coming back through the hook: let it pass
-            if getgenv()._F_FAKELAG_PASS then return end
             if packet.PacketId ~= 0x1B then return end
-            -- snapshot the packet. AsString is an immutable byte string, so it's
-            -- safe to stash and replay later without aliasing the live buffer.
+            -- AsString is the immutable raw payload; we use it both to replay
+            -- the packet and to recognise our own replays coming back through.
             local ok, data = pcall(function() return packet.AsString end)
             if not ok or type(data) ~= "string" then return end  -- can't capture -> send as normal
+            -- Is this one of our own replayed packets? Match by content, NOT a
+            -- timing flag: raknet.send may fire the hook a frame later, so a flag
+            -- set around the send call would already be cleared -> the replay
+            -- would get re-blocked forever (that's the "acts like a lagswitch"
+            -- bug). Content matching is timing-independent.
+            local pend = getgenv()._F_FAKELAG_PENDING
+            local n = pend[data]
+            if n and n > 0 then
+                pend[data] = (n > 1) and (n - 1) or nil
+                return  -- let our replay through
+            end
+            -- genuine new physics packet: hold it back, replay it later
             local q = getgenv()._F_FAKELAG_QUEUE
             q[#q + 1] = {
                 at   = tick() + (getgenv()._F_FAKELAG_MS or 200) / 1000,
@@ -3684,27 +3695,32 @@ F.fakeLag = (function()
                 rel  = packet.Reliability,
                 chan = packet.OrderingChannel,
             }
-            pcall(function() packet:Block() end)                 -- hold the original back
+            -- block the original the same way the (working) raknet desync does
+            pcall(function() packet:SetCanBeSent(false) end)
+            pcall(function() packet:Drop() end)
+            pcall(function() packet:Block() end)
+            pcall(function() packet:Ignore() end)
+            return false
         end
         pcall(function() r.add_send_hook(getgenv()._F_FAKELAG_FN) end)
 
-        -- single flusher: re-emit due packets in FIFO order once per frame. One
-        -- persistent connection instead of a task.delay per packet (which
-        -- churned the scheduler/GC and stuttered the frame). PASS is held across
-        -- the whole flush so every replayed packet skips the hook -- no per-send
-        -- toggle race, so nothing gets re-queued and the cadence stays steady.
+        -- single flusher: re-emit due packets in FIFO order once per frame (one
+        -- persistent connection, not a task.delay per packet which churned the
+        -- scheduler/GC). Each replay is tagged in PENDING by payload so the hook
+        -- recognises and passes it whenever raknet.send actually fires it.
         if not getgenv()._F_FAKELAG_FLUSHER then
             getgenv()._F_FAKELAG_FLUSHER = true
             game:GetService("RunService").Heartbeat:Connect(function()
+                if not getgenv()._F_FAKELAG_WANTED then return end
                 local q = getgenv()._F_FAKELAG_QUEUE
-                if not q or not q[1] or not getgenv()._F_FAKELAG_WANTED then return end
-                local now = tick()
-                getgenv()._F_FAKELAG_PASS = true
+                if not q or not q[1] then return end
+                local now  = tick()
+                local pend = getgenv()._F_FAKELAG_PENDING
                 while q[1] and q[1].at <= now do
                     local it = table.remove(q, 1)
+                    pend[it.data] = (pend[it.data] or 0) + 1
                     pcall(function() r.send(it.data, it.prio, it.rel, it.chan) end)
                 end
-                getgenv()._F_FAKELAG_PASS = false
             end)
         end
         return true
@@ -3715,17 +3731,17 @@ F.fakeLag = (function()
         start = function()
             if not ensureHook() then return false end
             active = true
-            getgenv()._F_FAKELAG_PASS   = false
             getgenv()._F_FAKELAG_WANTED = true
             return true
         end,
         stop = function()
             active = false
             getgenv()._F_FAKELAG_WANTED = false
-            getgenv()._F_FAKELAG_PASS   = false
-            -- drop any still-held packets; the next live 0x1B resyncs you
+            -- drop any still-held packets + tags; the next live 0x1B resyncs you
             local q = getgenv()._F_FAKELAG_QUEUE
             if q then for i = #q, 1, -1 do q[i] = nil end end
+            local pend = getgenv()._F_FAKELAG_PENDING
+            if pend then for k in pairs(pend) do pend[k] = nil end end
         end,
         isActive          = function() return active end,
         isRaknetAvailable = capable,
