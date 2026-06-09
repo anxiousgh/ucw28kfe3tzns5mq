@@ -291,6 +291,28 @@ regSlider(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", { min = 1, ma
 regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
 regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
 
+-- ============================================================
+--  FAKE LAG  (pulsed lagswitch)
+-- ============================================================
+local FakeLag = Window:NewTab("Fake Lag")
+FakeLag:NewSection("Fake lag")
+local fakeLagT
+fakeLagT = regToggle(FakeLag, "FakeLagEnabled", "Enable fake lag", false, function(v)
+    if v then
+        if not hook.fakeLag.start() then
+            notify("Fake lag unavailable: executor doesn't expose `raknet`", 5, "error")
+            if fakeLagT then fakeLagT:Set(false) end
+        end
+    else
+        hook.fakeLag.stop()
+    end
+end)
+fakeLagT:AddKeybind(Enum.KeyCode.H, "Fake Lag Toggle")
+-- how big the lag is: ms of withheld movement before it snaps (bigger = bigger jump)
+regSlider(FakeLag, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 2000, default = hook.fakeLag.getAmount() },
+    function(v) hook.fakeLag.setAmount(v) end)
+FakeLag:NewLabel("Higher = bigger rubber-band teleport to other players.", "left")
+
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
 -- ============================================================
