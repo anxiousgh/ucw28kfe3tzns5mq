@@ -462,6 +462,9 @@ do
     local vizColor    = Color3.fromRGB(0, 200, 255)
     local vizMaterial = "ForceField"
     local vizTransp   = 0.4
+    -- "Marker" = one static part (cheap, freeze-proof, like the desync ghost);
+    -- "Clone"  = full animated copy of you (heavier, can trip game anticheats)
+    local vizStyle    = "Marker"
 
     -- park the clone under the Camera, not workspace: it still renders in 3D
     -- but game scripts/anticheats that sweep workspace children for stray
@@ -548,6 +551,7 @@ do
         local char = LocalPlr.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if not char or not root then return end
+        if vizStyle == "Clone" then
         -- character models are often Archivable=false (can't be cloned);
         -- flip it on temporarily so :Clone() actually returns something
         local prevArch = char.Archivable
@@ -601,7 +605,10 @@ do
             }
             return
         end
-        -- fallback: cloning blocked -> a simple bright marker part
+        end  -- vizStyle == "Clone"
+        -- Marker style (and the clone fallback): a single bright part. This is
+        -- what the desync ghost does -- one cheap static part that no anticheat
+        -- flags and nothing has to re-clone -> never freezes.
         local m = Instance.new("Part")
         m.Name = "_wh_serverpos"; m.Size = Vector3.new(2, 5, 1)
         m.Anchored = true; m.CanCollide = false; m.CanQuery = false; m.CastShadow = false
@@ -641,6 +648,11 @@ do
         end)
     regSlider(Visuals, "ServerPosTransp", "Transparency", "%", { min = 0, max = 100, default = math.floor(vizTransp * 100) },
         function(v) vizTransp = v / 100; applyAppearance() end)
+    regDropdown(Visuals, "ServerPosStyle", "Style", vizStyle, { "Marker", "Clone" }, false, function(v)
+        vizStyle = v
+        if serverVizOn then buildClone(true) end   -- rebuild in the new style
+    end)
+    Visuals:NewLabel("Clone copies your animations/tools but is heavier; Marker is freeze-proof.", "left")
 
     LocalPlr.CharacterAdded:Connect(function()
         if serverVizOn then task.wait(0.4); if serverVizOn then buildClone(true) end end
