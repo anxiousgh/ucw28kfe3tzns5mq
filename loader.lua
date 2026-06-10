@@ -85,11 +85,20 @@ library.rank  = "user"
 library.title = "witherhook"
 
 -- ---------- watermark ----------
+-- ping comes from the engine's Data Ping stat (same source the old decay.lua
+-- watermark used), guarded since Stats isn't always reachable.
+local function getPing()
+    local ping = 0
+    pcall(function()
+        ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+    end)
+    return ping
+end
 local Wm    = library:Watermark("witherhook v" .. whVersion .. " | " .. gameName .. " | " .. library:GetUsername())
-local FpsWm = Wm:AddWatermark("fps: " .. library.fps)
+local FpsWm = Wm:AddWatermark("fps: " .. library.fps .. " | ping: " .. getPing() .. " ms")
 coroutine.wrap(function()
     while wait(0.75) do
-        FpsWm:Text("fps: " .. library.fps)
+        FpsWm:Text("fps: " .. library.fps .. " | ping: " .. getPing() .. " ms")
     end
 end)()
 
