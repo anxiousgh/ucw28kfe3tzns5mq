@@ -133,6 +133,64 @@ do
     end
     local function stopClaim() claimActive = false end
 
+    -- ---- auto place: drop held/finished tools onto empty counter slots ----
+    local placeActive = false
+    local function getPlaceRemote()
+        local rs      = game:GetService("ReplicatedStorage")
+        local riese   = rs:FindFirstChild("Riese")
+        local remotes = riese and riese:FindFirstChild("Remotes")
+        return remotes and remotes:FindFirstChild("PlaceDownItem")
+    end
+    -- first counter slot (a numbered model) whose Taken attribute is false
+    local function findEmptySlot()
+        local p = myPlot()
+        local counters = p and p:FindFirstChild("Counters")
+        if not counters then return nil end
+        for _, counter in ipairs(counters:GetChildren()) do
+            if counter:IsA("Model") then
+                for _, slot in ipairs(counter:GetChildren()) do
+                    local num = tonumber(slot.Name)   -- the "1" / "2" ... models
+                    if num and slot:GetAttribute("Taken") == false then
+                        return counter, num
+                    end
+                end
+            end
+        end
+        return nil
+    end
+    -- tools the player currently holds (equipped in character + in backpack)
+    local function heldTools()
+        local out = {}
+        local char = lplr.Character
+        if char then for _, c in ipairs(char:GetChildren()) do if c:IsA("Tool") then out[#out + 1] = c end end end
+        local bp = lplr:FindFirstChild("Backpack")
+        if bp   then for _, c in ipairs(bp:GetChildren())   do if c:IsA("Tool") then out[#out + 1] = c end end end
+        return out
+    end
+    local function startPlace()
+        if placeActive then return end
+        placeActive = true
+        task.spawn(function()
+            while placeActive and not library.Unloaded do
+                local remote = getPlaceRemote()
+                if remote then
+                    for _, tool in ipairs(heldTools()) do
+                        if not placeActive then break end
+                        local counter, num = findEmptySlot()
+                        if counter and num and tool.Parent then
+                            -- PlaceDownItem(tool, counterModel, slotNumber)
+                            pcall(function() remote:FireServer(tool, counter, num) end)
+                            task.wait(0.25)   -- let Taken + the tool's location update
+                        end
+                    end
+                end
+                task.wait(0.2)
+            end
+            placeActive = false
+        end)
+    end
+    local function stopPlace() placeActive = false end
+
     -- ---- UI ----
     local Cook = Window:NewTab("Cook & Sell")
     Cook:NewSection("Auto cook")
@@ -143,7 +201,10 @@ do
     regToggle(Cook, "CSAutoClaim", "Auto claim dessert", false, function(v)
         if v then startClaim() else stopClaim() end
     end)
-    Cook:NewLabel("Finds your plot by your shop name. Add empties SpawnedIngredients into the pot; Claim grabs the dessert when it's ready.", "left")
+    regToggle(Cook, "CSAutoPlace", "Auto place finished items", false, function(v)
+        if v then startPlace() else stopPlace() end
+    end)
+    Cook:NewLabel("Finds your plot by your shop name. Add empties SpawnedIngredients into the pot; Claim grabs the dessert when ready; Place drops held items onto free counter slots.", "left")
 end
 
 -- shared witherhook tabs below
