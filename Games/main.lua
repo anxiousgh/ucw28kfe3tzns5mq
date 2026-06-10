@@ -568,6 +568,40 @@ do
         return cur
     end
 
+    -- canonical rig parts (only these body parts get mirrored, so game-added
+    -- bits welded inside a limb -- e.g. HC's RightLowerArm.CUFF -- are skipped)
+    local R15_PARTS = {
+        Head = true, HumanoidRootPart = true, UpperTorso = true, LowerTorso = true,
+        LeftUpperArm = true, LeftLowerArm = true, LeftHand = true,
+        RightUpperArm = true, RightLowerArm = true, RightHand = true,
+        LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true,
+        RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
+    }
+    local R6_PARTS = {
+        Head = true, Torso = true, HumanoidRootPart = true,
+        ["Left Arm"] = true, ["Right Arm"] = true, ["Left Leg"] = true, ["Right Leg"] = true,
+    }
+    -- the set of REAL parts to mirror: the rig's body parts (direct children of
+    -- the character) + every Accessory / Tool part. Nothing nested inside a body
+    -- part, nothing else the game stuffs in the model.
+    local function wantedRealParts(char)
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local r15 = (hum and hum.RigType == Enum.HumanoidRigType.R15)
+            or char:FindFirstChild("UpperTorso") ~= nil
+        local bodySet = r15 and R15_PARTS or R6_PARTS
+        local wanted = {}   -- [realBasePart] = true
+        for _, d in ipairs(char:GetChildren()) do
+            if d:IsA("BasePart") then
+                if bodySet[d.Name] then wanted[d] = true end
+            elseif d:IsA("Accessory") or d:IsA("Tool") then
+                for _, p in ipairs(d:GetDescendants()) do
+                    if p:IsA("BasePart") then wanted[p] = true end
+                end
+            end
+        end
+        return wanted
+    end
+
     -- network round-trip in seconds. Prefer the engine's Data Ping stat (the
     -- number you actually see as your ping); fall back to GetNetworkPing, which
     -- is ~one-way so it gets doubled to approximate the round trip.
@@ -633,15 +667,24 @@ do
                     pcall(function() d:Destroy() end)
                 end
             end
-            -- pair every clone part with its live counterpart so we can copy
-            -- the exact limb pose (animations) + held tool handles each frame
+            -- pair every WANTED clone part with its live counterpart: only the
+            -- rig's body parts (R15/R6) + accessory/tool parts. Anything else --
+            -- e.g. a CUFF welded inside RightLowerArm -- is dropped from the clone.
             cloneParts = {}
+            local wanted = wantedRealParts(char)
+            local keep = {}   -- [cloneBasePart] = true
             for _, d in ipairs(c:GetDescendants()) do
                 if d:IsA("BasePart") then
                     local realPart = resolve(char, relPath(d, c))
-                    if realPart and realPart:IsA("BasePart") then
+                    if realPart and wanted[realPart] then
                         cloneParts[#cloneParts + 1] = { real = realPart, fake = d }
+                        keep[d] = true
                     end
+                end
+            end
+            for _, d in ipairs(c:GetDescendants()) do
+                if d:IsA("BasePart") and not keep[d] then
+                    pcall(function() d:Destroy() end)
                 end
             end
             -- DISGUISE so the game's anticheat doesn't read it as a player rig:
