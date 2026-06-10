@@ -49,6 +49,7 @@ local GAMES = {
     ["142823291"]     = "Murder Mystery 2",
     ["138995385694035"] = "Hood Customs",
     ["9825515356"]      = "Hood Customs",
+    ["7871169780"]      = "Blockerman's Minesweeper",
 }
 local supportedName = GAMES[placeId]   -- nil => unsupported => universal configs
 
