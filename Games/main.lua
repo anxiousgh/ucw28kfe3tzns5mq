@@ -458,8 +458,8 @@ regToggle(Visuals, "UnlockZoom", "Unlock zoom", false, function(v) if v then hoo
 Visuals:NewSection("Server position")
 do
     local RunSvc = game:GetService("RunService")
-    local SMOOTH = 16          -- glide speed toward the server position (higher = snappier)
     local serverVizOn = false
+    local pingHist = {}        -- { {t=, cf=}, ... } recent real CFrames for ping-based lookback
     local clone, rootPart, baseCF, hl
     local cloneParts   = {}    -- { { real = <BasePart>, fake = <BasePart> }, ... }
     local structConns  = {}
@@ -565,6 +565,25 @@ do
         return cur
     end
 
+    -- where the server thinks we are = our position `lookback` seconds ago.
+    -- Sample the buffered history at that time (interpolated for smoothness).
+    local function sampleAt(targetT)
+        local h = pingHist
+        local n = #h
+        if n == 0 then return nil end
+        if targetT <= h[1].t then return h[1].cf end
+        if targetT >= h[n].t then return h[n].cf end
+        for i = n, 2, -1 do
+            local a, b = h[i - 1], h[i]
+            if a.t <= targetT and targetT <= b.t then
+                local span = b.t - a.t
+                local f = (span > 0) and (targetT - a.t) / span or 0
+                return a.cf:Lerp(b.cf, f)
+            end
+        end
+        return h[n].cf
+    end
+
     local queueRebuild
     -- force=true bypasses the cooldown (toggle on / respawn). Without it, a
     -- clone that keeps getting removed (game cleanup, anticheat) can only
@@ -632,7 +651,7 @@ do
             hl = highlight(c)
             c.Parent = vizParent()
             clone, rootPart = c, root
-            baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+            baseCF = root.CFrame   -- seeded; recomputed each frame from ping history
             applyAppearance()
             -- rebuild ONLY when a tool/accessory is actually added or removed.
             -- (connecting to every child change re-clones the whole rig many
@@ -655,7 +674,7 @@ do
         hl = highlight(m)
         m.Parent = vizParent()
         clone, rootPart = m, root
-        baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or root.CFrame
+        baseCF = root.CFrame   -- seeded; recomputed each frame from ping history
         applyAppearance()
     end
 
@@ -671,10 +690,7 @@ do
     regToggle(Visuals, "ServerPosViz", "Server position visualizer", false, function(v)
         serverVizOn = v
         if v then
-            if hook.serverPos and not hook.serverPos.start() then
-                notify("Server pos needs a RakNet-capable executor", 4, "alert")
-            end
-            buildClone(true)
+            buildClone(true)   -- ping-based now; no raknet needed
         else
             destroyClone()
         end
@@ -707,13 +723,19 @@ do
             if not clone.Parent then buildClone(); return end
         end
         if not rootPart or not rootPart.Parent then buildClone(); return end
-        -- server position from the RakNet tracker; fall back to live HRP
-        -- until the first 0x1B packet is observed
-        local target = (hook.serverPos and hook.serverPos.getCFrame()) or rootPart.CFrame
-        -- glide the base toward the (discrete) server target so it flows
-        -- instead of snapping on every packet
-        local alpha = 1 - math.exp(-dt * SMOOTH)
-        baseCF = baseCF and baseCF:Lerp(target, alpha) or target
+        -- Server position from latency: the server sees us where we were one
+        -- network-ping ago, plus the fake-lag delay when it's active. Buffer the
+        -- real position each frame and look back by that total time.
+        local now = tick()
+        local realRoot = rootPart.CFrame
+        pingHist[#pingHist + 1] = { t = now, cf = realRoot }
+        while pingHist[1] and now - pingHist[1].t > 3 do table.remove(pingHist, 1) end
+        local lookback = 0
+        pcall(function() lookback = LocalPlr:GetNetworkPing() end)   -- seconds (~one-way)
+        if hook.fakeLag and hook.fakeLag.isActive and hook.fakeLag.isActive() then
+            lookback = lookback + ((hook.fakeLag.getAmount and hook.fakeLag.getAmount() or 0) / 1000)
+        end
+        baseCF = sampleAt(now - lookback) or realRoot
         if #cloneParts > 0 then
             -- reproduce every limb relative to the live root -> the clone
             -- animates and holds tools exactly like you, parked at the server spot
