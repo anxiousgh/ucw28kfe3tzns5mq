@@ -2053,6 +2053,9 @@ function library:Init(key)
             --
             function ToggleFunctions:AddKeybind(default_t, displayName)
                 callback_t = callback
+                -- pass Enum.KeyCode.Unknown for a bindable keybind with NO
+                -- default key: renders as "None" and never fires until bound.
+                local _unbound = (default_t == Enum.KeyCode.Unknown)
                 default_t = default_t or Enum.KeyCode.P
                 
                 local keybind = Instance.new("TextButton")
@@ -2129,7 +2132,7 @@ function library:Init(key)
                     MouseButton4 = "MB4", MouseButton5 = "MB5",
                 }
     
-                keybindButtonLabel.Text = Shortcuts[default_t.Name] or default_t.Name
+                keybindButtonLabel.Text = _unbound and "None" or (Shortcuts[default_t.Name] or default_t.Name)
                 CreateTween("keybind", 0.08)
                 
                 local NewKeybindSize = TextService:GetTextSize(keybindButtonLabel.Text, keybindButtonLabel.TextSize, keybindButtonLabel.Font, Vector2.new(math.huge,math.huge))
@@ -2146,8 +2149,8 @@ function library:Init(key)
                 keybindButtonLabel:GetPropertyChangedSignal("Text"):Connect(ResizeKeybind)
                 ResizeKeybind()
                 UpdatePageSize()
-    
-                local ChosenKey = default_t.Name
+
+                local ChosenKey = _unbound and "" or default_t.Name
     
                 keybind.MouseButton1Click:Connect(function()
                     keybindButtonLabel.Text = ". . ."

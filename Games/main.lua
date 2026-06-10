@@ -319,6 +319,8 @@ fakeLagT = regToggle(Desync, "FakeLagEnabled", "Enable fake lag", false, functio
         hook.fakeLag.stop()
     end
 end)
+-- bindable keybind, but no default key (Unknown => "None")
+fakeLagT:AddKeybind(Enum.KeyCode.Unknown, "Fake Lag Toggle")
 -- how big the lag is: ms each position update is delayed before it's re-sent
 regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, default = hook.fakeLag.getAmount() },
     function(v) hook.fakeLag.setAmount(v) end)
