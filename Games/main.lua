@@ -569,16 +569,19 @@ do
     end
 
     -- canonical rig parts (only these body parts get mirrored, so game-added
-    -- bits welded inside a limb -- e.g. HC's RightLowerArm.CUFF -- are skipped)
+    -- bits welded inside a limb -- e.g. HC's RightLowerArm.CUFF -- are skipped).
+    -- HumanoidRootPart is intentionally excluded: it's an invisible collision box
+    -- and our material/colour would render it as a block in the torso. The clone
+    -- positions every part independently, so it doesn't need one.
     local R15_PARTS = {
-        Head = true, HumanoidRootPart = true, UpperTorso = true, LowerTorso = true,
+        Head = true, UpperTorso = true, LowerTorso = true,
         LeftUpperArm = true, LeftLowerArm = true, LeftHand = true,
         RightUpperArm = true, RightLowerArm = true, RightHand = true,
         LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true,
         RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
     }
     local R6_PARTS = {
-        Head = true, Torso = true, HumanoidRootPart = true,
+        Head = true, Torso = true,
         ["Left Arm"] = true, ["Right Arm"] = true, ["Left Leg"] = true, ["Right Leg"] = true,
     }
     -- the set of REAL parts to mirror: the rig's body parts (direct children of
