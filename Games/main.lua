@@ -746,12 +746,20 @@ do
         local realRoot = rootPart.CFrame
         pingHist[#pingHist + 1] = { t = now, cf = realRoot }
         while pingHist[1] and now - pingHist[1].t > 3 do table.remove(pingHist, 1) end
-        local lookback = pingSeconds() + REPL_BUFFER
-        -- add the fake-lag delay ONLY while it's actually running
-        if hook.fakeLag and hook.fakeLag.isActive and hook.fakeLag.isActive() then
-            lookback = lookback + ((hook.fakeLag.getAmount and hook.fakeLag.getAmount() or 0) / 1000)
+        -- If a desync is spoofing/blocking your position, the server is NOT at
+        -- your ping-trailing real spot -- it's at the spoofed/frozen position.
+        -- Track that so the clone follows the desync, not you.
+        local desyncCF = hook.desync and hook.desync.getServerCFrame and hook.desync.getServerCFrame()
+        if desyncCF then
+            baseCF = desyncCF
+        else
+            local lookback = pingSeconds() + REPL_BUFFER
+            -- add the fake-lag delay ONLY while it's actually running
+            if hook.fakeLag and hook.fakeLag.isActive and hook.fakeLag.isActive() then
+                lookback = lookback + ((hook.fakeLag.getAmount and hook.fakeLag.getAmount() or 0) / 1000)
+            end
+            baseCF = sampleAt(now - lookback) or realRoot
         end
-        baseCF = sampleAt(now - lookback) or realRoot
         if #cloneParts > 0 then
             -- reproduce every limb relative to the live root -> the clone
             -- animates and holds tools exactly like you, parked at the server spot

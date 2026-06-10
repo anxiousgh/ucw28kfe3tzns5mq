@@ -3197,9 +3197,16 @@ F.desync = (function()
             -- voidspam: pure void desync (random per-frame position)
             if mode == "voidspam" then
                 local ge = getgenv()._F_DESYNC_SYNC_END or 0
-                if tick() < ge then return end
+                if tick() < ge then
+                    getgenv()._F_DESYNC_SENT_CF = hrp.CFrame  -- sync window: real pos replicates
+                    return
+                end
             end
             pcall(function() applySpoof(hrp) end)
+            -- the spoofed CFrame is exactly what replicates to the server (read by
+            -- the server-pos visualizer). raknet sets this at engage time instead,
+            -- since it blocks via the send hook with no Heartbeat loop.
+            getgenv()._F_DESYNC_SENT_CF = hrp.CFrame
         end)
 
         RunService:BindToRenderStep(
@@ -3406,7 +3413,12 @@ F.desync = (function()
             -- build the ghost at the current HRP position so the user
             local c = lplr.Character
             local hrp = c and c:FindFirstChild("HumanoidRootPart")
-            if hrp then ghostCreate(hrp.Position) end
+            if hrp then
+                ghostCreate(hrp.Position)
+                -- raknet blocks replication, so the server stays frozen here for
+                -- the whole desync -> report this spot as the server position.
+                getgenv()._F_DESYNC_SENT_CF = hrp.CFrame
+            end
             return
         end
         -- non-raknet mode: tear down any existing ghost
@@ -3443,6 +3455,8 @@ F.desync = (function()
             end)
         end
         realCF, realLV, realAV = nil, nil, nil
+        getgenv()._F_DESYNC_SENT_CF = nil
+        getgenv()._F_DESYNC_FROZEN  = nil
         mode = "off"
     end
 
@@ -3521,6 +3535,13 @@ F.desync = (function()
         isRaknetAvailable = function() return findRaknet() ~= nil end,
         isActive        = function() return active end,
         getMode         = function() return mode end,
+        -- where the server currently has you while a desync is running (spoofed
+        -- position for move modes, frozen spot for raknet). nil when off. Used by
+        -- the server-pos visualizer so it tracks the desync instead of you.
+        getServerCFrame = function()
+            if active and mode ~= "off" then return getgenv()._F_DESYNC_SENT_CF end
+            return nil
+        end,
         setRange        = function(minV, maxV)
             VOID_MIN = math.max(100, tonumber(minV) or VOID_MIN)
             VOID_MAX = math.max(VOID_MIN + 1, tonumber(maxV) or VOID_MAX)
