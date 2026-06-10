@@ -565,6 +565,19 @@ do
         return cur
     end
 
+    -- network round-trip in seconds. Prefer the engine's Data Ping stat (the
+    -- number you actually see as your ping); fall back to GetNetworkPing, which
+    -- is ~one-way so it gets doubled to approximate the round trip.
+    local Stats = game:GetService("Stats")
+    local function pingSeconds()
+        local ms
+        pcall(function() ms = Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+        if type(ms) == "number" and ms > 0 then return ms / 1000 end
+        local p = 0
+        pcall(function() p = LocalPlr:GetNetworkPing() * 2 end)
+        return p
+    end
+
     -- where the server thinks we are = our position `lookback` seconds ago.
     -- Sample the buffered history at that time (interpolated for smoothness).
     local function sampleAt(targetT)
@@ -730,8 +743,8 @@ do
         local realRoot = rootPart.CFrame
         pingHist[#pingHist + 1] = { t = now, cf = realRoot }
         while pingHist[1] and now - pingHist[1].t > 3 do table.remove(pingHist, 1) end
-        local lookback = 0
-        pcall(function() lookback = LocalPlr:GetNetworkPing() end)   -- seconds (~one-way)
+        local lookback = pingSeconds()
+        -- add the fake-lag delay ONLY while it's actually running
         if hook.fakeLag and hook.fakeLag.isActive and hook.fakeLag.isActive() then
             lookback = lookback + ((hook.fakeLag.getAmount and hook.fakeLag.getAmount() or 0) / 1000)
         end

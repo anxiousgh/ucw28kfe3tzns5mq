@@ -3763,7 +3763,9 @@ F.fakeLag = (function()
             local pend = getgenv()._F_FAKELAG_PENDING
             if pend then for k in pairs(pend) do pend[k] = nil end end
         end,
-        isActive          = function() return active end,
+        -- reflect the REAL running state: WANTED is cleared on stop AND on the
+        -- safety overflow bail, so a crashed/disabled fake lag won't read active.
+        isActive          = function() return getgenv()._F_FAKELAG_WANTED == true end,
         isRaknetAvailable = capable,
         -- "size" of the lag = how long each update is held back (ms)
         setAmount = function(ms) getgenv()._F_FAKELAG_MS = math.clamp(tonumber(ms) or 200, 20, 1000) end,
