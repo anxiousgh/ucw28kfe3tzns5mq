@@ -197,14 +197,14 @@ do
     regToggle(Cook, "CSAutoAdd", "Auto add ingredients", false, function(v)
         if v then startAdd() else stopAdd() end
     end)
-    regDecimal(Cook, "CSAddDelay", "Add delay", " s", 0, 1, 0.1, 100, function(v) addDelay = v end)
+    -- shown in ms (0-1000), applied to addDelay in seconds
+    regDecimal(Cook, "CSAddDelay", "Add delay", " ms", 0, 1, 0.1, 1000, function(v) addDelay = v end)
     regToggle(Cook, "CSAutoClaim", "Auto claim dessert", false, function(v)
         if v then startClaim() else stopClaim() end
     end)
     regToggle(Cook, "CSAutoPlace", "Auto place finished items", false, function(v)
         if v then startPlace() else stopPlace() end
     end)
-    Cook:NewLabel("Finds your plot by your shop name. Add empties SpawnedIngredients into the pot; Claim grabs the dessert when ready; Place drops held items onto free counter slots.", "left")
 end
 
 -- shared witherhook tabs below
