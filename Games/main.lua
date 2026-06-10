@@ -444,6 +444,7 @@ regToggle(Visuals, "UnlockZoom", "Unlock zoom", false, function(v) if v then hoo
 Visuals:NewSection("Server position")
 do
     local RunSvc = game:GetService("RunService")
+    local SMOOTH = 16          -- glide speed toward the server position (higher = snappier)
     local serverVizOn = false
     local clone, rootPart, baseCF, hl
     local cloneParts   = {}    -- { { real = <BasePart>, fake = <BasePart> }, ... }
@@ -693,10 +694,12 @@ do
         end
         if not rootPart or not rootPart.Parent then buildClone(); return end
         -- server position from the RakNet tracker; fall back to live HRP
-        -- until the first 0x1B packet is observed. Snap straight to it (no
-        -- smoothing) so it shows the EXACT last position the server received --
-        -- a lerp would trail behind and read as inaccurate.
-        baseCF = (hook.serverPos and hook.serverPos.getCFrame()) or rootPart.CFrame
+        -- until the first 0x1B packet is observed
+        local target = (hook.serverPos and hook.serverPos.getCFrame()) or rootPart.CFrame
+        -- glide the base toward the (discrete) server target so it flows
+        -- instead of snapping on every packet
+        local alpha = 1 - math.exp(-dt * SMOOTH)
+        baseCF = baseCF and baseCF:Lerp(target, alpha) or target
         if #cloneParts > 0 then
             -- reproduce every limb relative to the live root -> the clone
             -- animates and holds tools exactly like you, parked at the server spot
