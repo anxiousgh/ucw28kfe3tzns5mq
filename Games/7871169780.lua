@@ -3596,9 +3596,12 @@ local bms = hook.games.bms
 if bms then
 
 local autoPlayT, autoFlagT
+local tokenLblPlay, tokenLblFlag
 
 -- ---------------- AUTOPLAY ----------------
 local AutoPlay = Window:NewTab("Autoplay")
+AutoPlay:NewSection("Token")
+tokenLblPlay = AutoPlay:NewLabel("Token: checking...", "left")
 AutoPlay:NewSection("Auto play")
 autoPlayT = regToggle(AutoPlay, "BMSAutoPlay", "Auto play (walk safes + flag mines)", false, function(v)
     if v then
@@ -3635,6 +3638,8 @@ AutoPlay:NewLabel("Auto play reuses the Flag delay/range + Aim cone settings fro
 
 -- ---------------- AUTOFLAG ----------------
 local AutoFlag = Window:NewTab("Autoflag")
+AutoFlag:NewSection("Token")
+tokenLblFlag = AutoFlag:NewLabel("Token: checking...", "left")
 AutoFlag:NewSection("Legit auto-flag")
 autoFlagT = regToggle(AutoFlag, "BMSLegitFlag", "Auto-flag deduced mines", false, function(v)
     if v then
@@ -3657,7 +3662,6 @@ regColor(AutoFlag, "BMSAimConeColor", "Aim cone color", bms.legitFlag.getAimCone
 
 AutoFlag:NewSection("Playstyle")
 regDropdown(AutoFlag, "BMSPlaystyle", "Playstyle", "legit", { "legit", "logical" }, false, function(v) bms.setPlaystyle(v) end)
-AutoFlag:NewLabel("Place one flag manually first so the token gets captured.", "left")
 
 -- ---------------- MOUSE MOVER ----------------
 local MouseMover = Window:NewTab("Mouse mover")
@@ -3682,4 +3686,20 @@ MouseMover:NewSection("Triggerbot")
 regToggle(MouseMover, "BMSTriggerbot", "Enable triggerbot", false, function(v) bms.stealth.setTriggerbot(v) end)
 regSlider(MouseMover, "BMSTriggerRange", "Triggerbot range", " px", { min = 1, max = 50, default = 12 }, function(v) bms.stealth.setTriggerRange(v) end)
 
+-- live token status: the PlaceFlag token is captured from your first manual
+-- flag. Auto-flag / auto-play can't fire until it's been seen.
+task.spawn(function()
+    while true do
+        local txt = bms.hasToken()
+            and "Token: CAPTURED - auto-flag & auto-play are ready."
+            or  "Token: not captured yet - place ONE flag manually to capture it."
+        if tokenLblPlay then pcall(function() tokenLblPlay:Text(txt) end) end
+        if tokenLblFlag then pcall(function() tokenLblFlag:Text(txt) end) end
+        task.wait(0.5)
+    end
+end)
+
 end  -- if bms
+
+-- shared witherhook tabs (Movement / Players / Visuals / Misc / Settings / ...)
+api.buildShared()
