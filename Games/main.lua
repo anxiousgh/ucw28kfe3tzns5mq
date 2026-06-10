@@ -302,7 +302,21 @@ fakeLagT = regToggle(FakeLag, "FakeLagEnabled", "Enable fake lag", false, functi
         if not hook.fakeLag.start() then
             notify("Fake lag unavailable: executor doesn't expose `raknet`", 5, "error")
             if fakeLagT then fakeLagT:Set(false) end
+            return
         end
+        -- watch the safety bail: if our re-sent packets don't round-trip on this
+        -- executor the backend disables itself before it can crash. Reflect that
+        -- in the UI instead of leaving a dead toggle on.
+        task.spawn(function()
+            while flags["FakeLagEnabled"] do
+                if hook.fakeLag.didOverflow and hook.fakeLag.didOverflow() then
+                    notify("Fake lag isn't supported on this executor (it would crash) - disabled", 6, "error")
+                    if fakeLagT then fakeLagT:Set(false) end
+                    return
+                end
+                task.wait(0.5)
+            end
+        end)
     else
         hook.fakeLag.stop()
     end

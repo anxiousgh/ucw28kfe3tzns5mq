@@ -3688,6 +3688,19 @@ F.fakeLag = (function()
             end
             -- genuine new physics packet: hold it back, replay it later
             local q = getgenv()._F_FAKELAG_QUEUE
+            -- SAFETY: if the queue isn't draining, our replays aren't round-
+            -- tripping on this executor (raknet.send produces a packet whose
+            -- AsString differs, so it never matches PENDING and re-queues
+            -- forever). Left unchecked the queue + pending map grow without
+            -- bound until the client runs out of memory and CRASHES. Bail out:
+            -- disable, flush state, and let traffic flow normally.
+            if #q >= 256 then
+                getgenv()._F_FAKELAG_WANTED   = false
+                getgenv()._F_FAKELAG_OVERFLOW = true
+                for i = #q, 1, -1 do q[i] = nil end
+                for k in pairs(pend) do pend[k] = nil end
+                return
+            end
             q[#q + 1] = {
                 at   = tick() + (getgenv()._F_FAKELAG_MS or 200) / 1000,
                 data = data,
@@ -3716,10 +3729,14 @@ F.fakeLag = (function()
                 if not q or not q[1] then return end
                 local now  = tick()
                 local pend = getgenv()._F_FAKELAG_PENDING
-                while q[1] and q[1].at <= now do
+                -- cap re-sends per frame so a filled delay window can't dump a
+                -- huge burst of raknet.send calls at once (that spikes/crashes)
+                local sent = 0
+                while q[1] and q[1].at <= now and sent < 32 do
                     local it = table.remove(q, 1)
                     pend[it.data] = (pend[it.data] or 0) + 1
                     pcall(function() r.send(it.data, it.prio, it.rel, it.chan) end)
+                    sent = sent + 1
                 end
             end)
         end
@@ -3731,9 +3748,12 @@ F.fakeLag = (function()
         start = function()
             if not ensureHook() then return false end
             active = true
+            getgenv()._F_FAKELAG_OVERFLOW = false
             getgenv()._F_FAKELAG_WANTED = true
             return true
         end,
+        -- true if the safety bail tripped (replays not round-tripping here)
+        didOverflow = function() return getgenv()._F_FAKELAG_OVERFLOW == true end,
         stop = function()
             active = false
             getgenv()._F_FAKELAG_WANTED = false
