@@ -197,8 +197,8 @@ do
     regToggle(Cook, "CSAutoAdd", "Auto add ingredients", false, function(v)
         if v then startAdd() else stopAdd() end
     end)
-    -- shown in ms (0-1000), applied to addDelay in seconds
-    regDecimal(Cook, "CSAddDelay", "Add delay", " ms", 0, 1, 0.1, 1000, function(v) addDelay = v end)
+    -- shown in ms (1-60), applied to addDelay in seconds
+    regDecimal(Cook, "CSAddDelay", "Add delay", " ms", 0.001, 0.06, 0.01, 1000, function(v) addDelay = v end)
     regToggle(Cook, "CSAutoClaim", "Auto claim dessert", false, function(v)
         if v then startClaim() else stopClaim() end
     end)
