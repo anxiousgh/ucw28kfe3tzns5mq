@@ -3684,6 +3684,7 @@ F.fakeLag = (function()
             local n = pend[data]
             if n and n > 0 then
                 pend[data] = (n > 1) and (n - 1) or nil
+                getgenv()._F_FAKELAG_PENDN = (getgenv()._F_FAKELAG_PENDN or 0) - 1
                 return  -- let our replay through
             end
             -- genuine new physics packet: hold it back, replay it later
@@ -3699,6 +3700,7 @@ F.fakeLag = (function()
                 getgenv()._F_FAKELAG_OVERFLOW = true
                 for i = #q, 1, -1 do q[i] = nil end
                 for k in pairs(pend) do pend[k] = nil end
+                getgenv()._F_FAKELAG_PENDN = 0
                 return
             end
             q[#q + 1] = {
@@ -3729,12 +3731,24 @@ F.fakeLag = (function()
                 if not q or not q[1] then return end
                 local now  = tick()
                 local pend = getgenv()._F_FAKELAG_PENDING
+                -- PENDING leak guard: replays that don't come back byte-identical
+                -- never get matched/decremented, so the map creeps up forever and
+                -- the game CLOSES after a while. If it grows unbounded, bail.
+                if (getgenv()._F_FAKELAG_PENDN or 0) > 400 then
+                    getgenv()._F_FAKELAG_WANTED   = false
+                    getgenv()._F_FAKELAG_OVERFLOW = true
+                    for i = #q, 1, -1 do q[i] = nil end
+                    for k in pairs(pend) do pend[k] = nil end
+                    getgenv()._F_FAKELAG_PENDN = 0
+                    return
+                end
                 -- cap re-sends per frame so a filled delay window can't dump a
                 -- huge burst of raknet.send calls at once (that spikes/crashes)
                 local sent = 0
                 while q[1] and q[1].at <= now and sent < 32 do
                     local it = table.remove(q, 1)
                     pend[it.data] = (pend[it.data] or 0) + 1
+                    getgenv()._F_FAKELAG_PENDN = (getgenv()._F_FAKELAG_PENDN or 0) + 1
                     pcall(function() r.send(it.data, it.prio, it.rel, it.chan) end)
                     sent = sent + 1
                 end
@@ -3749,6 +3763,11 @@ F.fakeLag = (function()
             if not ensureHook() then return false end
             active = true
             getgenv()._F_FAKELAG_OVERFLOW = false
+            getgenv()._F_FAKELAG_PENDN    = 0
+            local q = getgenv()._F_FAKELAG_QUEUE
+            if q then for i = #q, 1, -1 do q[i] = nil end end
+            local pend = getgenv()._F_FAKELAG_PENDING
+            if pend then for k in pairs(pend) do pend[k] = nil end end
             getgenv()._F_FAKELAG_WANTED = true
             return true
         end,
@@ -3762,6 +3781,7 @@ F.fakeLag = (function()
             if q then for i = #q, 1, -1 do q[i] = nil end end
             local pend = getgenv()._F_FAKELAG_PENDING
             if pend then for k in pairs(pend) do pend[k] = nil end end
+            getgenv()._F_FAKELAG_PENDN = 0
         end,
         -- reflect the REAL running state: WANTED is cleared on stop AND on the
         -- safety overflow bail, so a crashed/disabled fake lag won't read active.
