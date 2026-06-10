@@ -460,6 +460,10 @@ do
     local RunSvc = game:GetService("RunService")
     local serverVizOn = false
     local pingHist = {}        -- { {t=, cf=}, ... } recent real CFrames for ping-based lookback
+    -- on top of raw ping, Roblox processes/interpolates replicated character
+    -- movement ~100ms behind. Without this the clone sits right on you at low
+    -- ping; with it the offset matches where the server actually has you.
+    local REPL_BUFFER = 0.10
     local clone, rootPart, baseCF, hl
     local cloneParts   = {}    -- { { real = <BasePart>, fake = <BasePart> }, ... }
     local structConns  = {}
@@ -743,7 +747,7 @@ do
         local realRoot = rootPart.CFrame
         pingHist[#pingHist + 1] = { t = now, cf = realRoot }
         while pingHist[1] and now - pingHist[1].t > 3 do table.remove(pingHist, 1) end
-        local lookback = pingSeconds()
+        local lookback = pingSeconds() + REPL_BUFFER
         -- add the fake-lag delay ONLY while it's actually running
         if hook.fakeLag and hook.fakeLag.isActive and hook.fakeLag.isActive() then
             lookback = lookback + ((hook.fakeLag.getAmount and hook.fakeLag.getAmount() or 0) / 1000)
