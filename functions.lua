@@ -3197,9 +3197,19 @@ F.desync = (function()
             -- voidspam: pure void desync (random per-frame position)
             if mode == "voidspam" then
                 local ge = getgenv()._F_DESYNC_SYNC_END or 0
-                if tick() < ge then return end
+                if tick() < ge then
+                    -- in the sync window we don't spoof -> the real CFrame is
+                    -- what replicates
+                    getgenv()._F_DESYNC_SENT_CF = hrp.CFrame
+                    return
+                end
             end
             pcall(function() applySpoof(hrp) end)
+            -- record the EXACT CFrame handed to replication. The server-pos
+            -- visualizer uses this: reading hrp from the send hook is unreliable
+            -- because the RESTORE renderstep flips hrp back to the real spot every
+            -- frame, so the hook catches a spoof/real mix and lands "in between".
+            getgenv()._F_DESYNC_SENT_CF = hrp.CFrame
         end)
 
         RunService:BindToRenderStep(
@@ -3635,8 +3645,19 @@ F.serverPos = (function()
         end,
         stop        = function() getgenv()._F_SERVERPOS_WANTED = false end,
         isAvailable = function() return findRaknet() ~= nil end,
-        -- last position the server received; nil until a 0x1B is seen.
-        getCFrame   = function() return getgenv()._F_SERVERPOS_CF end,
+        -- last position the server received. During a position-spoofing desync,
+        -- the desync records the EXACT CFrame it hands to replication -- use that
+        -- (observing hrp directly catches the desync's per-frame spoof/restore
+        -- flip and lands halfway). raknet mode blocks instead of moving, so for
+        -- it fall back to the observed value (frozen while blocking).
+        getCFrame   = function()
+            local d = getgenv()._F_DESYNC_STATE
+            if d and d.active and d.mode ~= "off" and d.mode ~= "raknet" then
+                local sent = getgenv()._F_DESYNC_SENT_CF
+                if sent then return sent end
+            end
+            return getgenv()._F_SERVERPOS_CF
+        end,
     }
 end)()
 
