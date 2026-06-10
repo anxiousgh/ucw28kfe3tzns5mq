@@ -291,13 +291,10 @@ regSlider(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", { min = 1, ma
 regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
 regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
 
--- ============================================================
---  FAKE LAG  (pulsed lagswitch)
--- ============================================================
-local FakeLag = Window:NewTab("Fake Lag")
-FakeLag:NewSection("Fake lag")
+-- ---- fake lag (in the Desync tab, below the desync section, no keybind) ----
+Desync:NewSection("Fake lag")
 local fakeLagT
-fakeLagT = regToggle(FakeLag, "FakeLagEnabled", "Enable fake lag", false, function(v)
+fakeLagT = regToggle(Desync, "FakeLagEnabled", "Enable fake lag", false, function(v)
     if v then
         if not hook.fakeLag.start() then
             notify("Fake lag unavailable: executor doesn't expose `raknet`", 5, "error")
@@ -321,11 +318,10 @@ fakeLagT = regToggle(FakeLag, "FakeLagEnabled", "Enable fake lag", false, functi
         hook.fakeLag.stop()
     end
 end)
-fakeLagT:AddKeybind(Enum.KeyCode.H, "Fake Lag Toggle")
 -- how big the lag is: ms each position update is delayed before it's re-sent
-regSlider(FakeLag, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, default = hook.fakeLag.getAmount() },
+regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, default = hook.fakeLag.getAmount() },
     function(v) hook.fakeLag.setAmount(v) end)
-FakeLag:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
+Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
 
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
