@@ -1812,6 +1812,13 @@ hook.games.bms = (function()
         -- tiles the cursor wasn't even near - the exact giveaway
         -- the cursor sim is supposed to prevent.
         if _st.rmbHeld then return true end
+        -- Cursor sim OFF -> fire immediately: no rate cap, reaction delay,
+        -- hesitation or cursor sweep. This keeps the auto-flag fast by default;
+        -- the human pacing below only kicks in once cursor sim is enabled.
+        if not _st.cursorOn then
+            _st.lastFireAt = tick()
+            return false
+        end
         if _st.minSecBetween > 0 then
             local elapsed = tick() - _st.lastFireAt
             if elapsed < _st.minSecBetween then
@@ -3663,6 +3670,24 @@ regColor(AutoFlag, "BMSAimConeColor", "Aim cone color", bms.legitFlag.getAimCone
 
 AutoFlag:NewSection("Playstyle")
 regDropdown(AutoFlag, "BMSPlaystyle", "Playstyle", "legit", { "legit", "logical" }, false, function(v) bms.setPlaystyle(v) end)
+
+-- ---------------- ESP ----------------
+local Esp = Window:NewTab("ESP")
+Esp:NewSection("Mine ESP")
+regToggle(Esp, "BMSEsp", "Mine ESP", false, function(v) if v then bms.esp.start() else bms.esp.stop() end end)
+regSlider(Esp, "BMSEspRange", "ESP range", " studs", { min = 10, max = 1000, default = 80 }, function(v) bms.esp.setRange(v) end)
+regToggle(Esp, "BMSEspShowSafes", "Highlight deduced-safe tiles", false, function(v) bms.esp.setShowSafes(v) end)
+regToggle(Esp, "BMSEspShowWarnings", "Highlight false-flag warnings", true, function(v) bms.esp.setShowWarnings(v) end)
+regToggle(Esp, "BMSEspShowFifties", "Highlight 50/50 tiles", true, function(v) bms.esp.setShowFifties(v) end)
+regToggle(Esp, "BMSEspHeatmap", "Heatmap (probability gradient)", false, function(v) bms.esp.setHeatmap(v) end)
+Esp:NewSection("Colors")
+regColor(Esp, "BMSEspMineColor", "Mine color", bms.esp.getMineColor(), function(c) bms.esp.setMineColor(c) end)
+regColor(Esp, "BMSEspSafeColor", "Safe color", bms.esp.getSafeColor(), function(c) bms.esp.setSafeColor(c) end)
+regColor(Esp, "BMSEspWarnColor", "False-flag color", bms.esp.getWarnColor(), function(c) bms.esp.setWarnColor(c) end)
+regColor(Esp, "BMSEspFiftyColor", "50/50 color", bms.esp.getFiftyColor(), function(c) bms.esp.setFiftyColor(c) end)
+Esp:NewSection("Scan radius")
+regToggle(Esp, "BMSScanRadiusViz", "Show ESP scan radius", false, function(v) bms.esp.setScanRadiusViz(v) end)
+regColor(Esp, "BMSScanRadiusColor", "Scan radius color", bms.esp.getScanRadiusColor(), function(c) bms.esp.setScanRadiusColor(c) end)
 
 -- ---------------- MOUSE MOVER ----------------
 local MouseMover = Window:NewTab("Mouse mover")
