@@ -191,9 +191,69 @@ do
     end
     local function stopPlace() placeActive = false end
 
+    -- ---- auto cook: click pantry desserts to start cooking (if a slot is free) ----
+    local cookActive = false
+    -- the bought-desserts list lives in PlayerGui
+    local function getPantryScroll()
+        local pg = lplr:FindFirstChild("PlayerGui")
+        if not pg then return nil end
+        local node = pg:FindFirstChild("Pantry")
+        for _, n in ipairs({ "Main", "Content", "ScrollerHolder", "ScrollFrame" }) do
+            node = node and node:FindFirstChild(n)
+        end
+        return node
+    end
+    -- programmatically "click" a GUI button by firing its click signal
+    local function fireSignal(sig)
+        if not sig then return end
+        pcall(function()
+            if firesignal then
+                firesignal(sig)
+            elseif getconnections then
+                for _, c in ipairs(getconnections(sig)) do
+                    if c.Fire then c:Fire() end
+                end
+            end
+        end)
+    end
+    local function clickButton(obj)
+        local btn = obj:IsA("GuiButton") and obj or obj:FindFirstChildWhichIsA("GuiButton", true)
+        if not btn then return false end
+        fireSignal(btn.MouseButton1Click)
+        fireSignal(btn.Activated)
+        return true
+    end
+    local function startCook()
+        if cookActive then return end
+        cookActive = true
+        task.spawn(function()
+            while cookActive and not library.Unloaded do
+                -- only cook while there's a free counter to hold the result
+                if findEmptySlot() ~= nil then
+                    local sf = getPantryScroll()
+                    if sf then
+                        for _, item in ipairs(sf:GetChildren()) do
+                            if not cookActive then break end
+                            if item:IsA("GuiObject") then
+                                clickButton(item)
+                                task.wait(0.1)
+                            end
+                        end
+                    end
+                end
+                task.wait(0.3)
+            end
+            cookActive = false
+        end)
+    end
+    local function stopCook() cookActive = false end
+
     -- ---- UI ----
     local Cook = Window:NewTab("Cook & Sell")
     Cook:NewSection("Auto cook")
+    regToggle(Cook, "CSAutoCook", "Auto start cooking", false, function(v)
+        if v then startCook() else stopCook() end
+    end)
     regToggle(Cook, "CSAutoAdd", "Auto add ingredients", false, function(v)
         if v then startAdd() else stopAdd() end
     end)
