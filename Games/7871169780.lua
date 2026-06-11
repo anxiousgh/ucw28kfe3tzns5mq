@@ -3419,8 +3419,8 @@ hook.games.bms = (function()
             -- Setters reset lastFlagAt so the new value takes effect on
             -- the very next tick instead of waiting for the OLD cooldown
             -- to elapse. That was the 'settings don't feel live' issue.
-            setDelayMin   = function(n) flagDelayMin   = math.clamp(tonumber(n) or 0.6, 0.05, 10); lastFlagAt = 0 end,
-            setDelayMax   = function(n) flagDelayMax   = math.clamp(tonumber(n) or 1.4, 0.05, 10); lastFlagAt = 0 end,
+            setDelayMin   = function(n) flagDelayMin   = math.clamp(tonumber(n) or 0.6, 0, 10); lastFlagAt = 0 end,
+            setDelayMax   = function(n) flagDelayMax   = math.clamp(tonumber(n) or 1.4, 0, 10); lastFlagAt = 0 end,
             setMissChance = function(n) flagMissChance = math.clamp(tonumber(n) or 0,   0,    100) end,
             setRange      = function(n) flagRange = math.clamp(tonumber(n) or 60, 5, 500) end,
             setAimCone    = function(v) flagAimCone = v == true end,
@@ -3649,8 +3649,9 @@ autoFlagT = regToggle(AutoFlag, "BMSLegitFlag", "Auto-flag deduced mines", false
         bms.legitFlag.stop()
     end
 end)
-regDecimal(AutoFlag, "BMSFlagDelayMin", "Flag delay min", " s", 0.05, 10, 0.6, 100, function(v) bms.legitFlag.setDelayMin(v) end)
-regDecimal(AutoFlag, "BMSFlagDelayMax", "Flag delay max", " s", 0.05, 10, 1.4, 100, function(v) bms.legitFlag.setDelayMax(v) end)
+-- shown in ms (0-240), applied in seconds
+regDecimal(AutoFlag, "BMSFlagDelayMin", "Flag delay min", " ms", 0, 0.24, 0, 1000, function(v) bms.legitFlag.setDelayMin(v) end)
+regDecimal(AutoFlag, "BMSFlagDelayMax", "Flag delay max", " ms", 0, 0.24, 0.24, 1000, function(v) bms.legitFlag.setDelayMax(v) end)
 regSlider(AutoFlag, "BMSFlagMissChance", "Flag miss chance", " %", { min = 0, max = 100, default = 0 }, function(v) bms.legitFlag.setMissChance(v) end)
 regSlider(AutoFlag, "BMSFlagRange", "Flag range", " studs", { min = 5, max = 500, default = 60 }, function(v) bms.legitFlag.setRange(v) end)
 
