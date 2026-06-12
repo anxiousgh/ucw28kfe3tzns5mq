@@ -1911,24 +1911,38 @@ hook.games.bms = (function()
                     end
                 end
                 if best then
-                    -- roll for miss chance (makes flagging look less robotic)
-                    if not flagMissRoll() then
-                        local skip = preFlagSequence(best)
-                        if not skip then
-                            pcall(function() remote:FireServer(best, token, true) end)
-                        end
-                    end
                     if playstyleMode == "logical" then
-                        -- 0.8-1.6s 'reading the new state' beat
+                        -- logical: flag, then a long 'reading the board' beat
+                        if not flagMissRoll() then
+                            local skip = preFlagSequence(best)
+                            if not skip then
+                                pcall(function() remote:FireServer(best, token, true) end)
+                            end
+                        end
+                        lastFlagAt = tick()
                         task.wait(0.8 + math.random() * 0.8)
                     else
-                        task.wait(flagDelayRoll())
+                        -- legit: the delay is the MINIMUM gap BETWEEN flags. Wait
+                        -- only the remainder of the gap since the last flag - so a
+                        -- freshly uncovered bomb is flagged the moment the spacing
+                        -- allows, instead of every detection eating a full delay.
+                        local gap   = flagDelayRoll()
+                        local since = tick() - lastFlagAt
+                        if since < gap then task.wait(gap - since) end
+                        if not flagActive then break end
+                        if not flagMissRoll() then
+                            local skip = preFlagSequence(best)
+                            if not skip then
+                                pcall(function() remote:FireServer(best, token, true) end)
+                            end
+                        end
+                        lastFlagAt = tick()
                     end
                 else
                     if playstyleMode == "logical" then
                         task.wait(0.4 + math.random() * 0.5)  -- 0.4-0.9s
                     else
-                        task.wait(0.25)  -- nothing to flag right now, idle
+                        task.wait(0.05)  -- idle: poll fast so new bombs get caught promptly
                     end
                 end
             end
