@@ -459,7 +459,8 @@ Visuals:NewSection("Server position")
 do
     local RunSvc = game:GetService("RunService")
     local serverVizOn = false
-    local pingHist = {}        -- { {t=, cf=}, ... } recent real CFrames for ping-based lookback
+    local pingHist = {}        -- { {t=, cf=}, ... } recent real root CFrames (marker lookback)
+    local poseHist = {}        -- { {t=, poses={cf_i}}, ... } recent full poses (delayed animation)
     -- on top of raw ping, Roblox processes/interpolates replicated character
     -- movement ~100ms behind. Without this the clone sits right on you at low
     -- ping; with it the offset matches where the server actually has you.
@@ -499,6 +500,7 @@ do
     local function destroyClone()
         clearStructConns()
         cloneParts = {}
+        poseHist   = {}   -- poses are indexed by cloneParts -> stale after a rebuild
         if clone then clone:Destroy(); clone = nil end
         rootPart, baseCF, hl = nil, nil, nil
     end
@@ -617,6 +619,23 @@ do
         local p = 0
         pcall(function() p = LocalPlr:GetNetworkPing() * 2 end)
         return p
+    end
+
+    -- find the two pose snapshots bracketing targetT (+ the blend fraction),
+    -- once per frame, so each part's delayed pose is then just an O(1) lookup.
+    local function bracketPose(targetT)
+        local h = poseHist
+        local n = #h
+        if n == 0 then return nil, nil, 0 end
+        if targetT <= h[1].t then return h[1], h[1], 0 end
+        if targetT >= h[n].t then return h[n], h[n], 0 end
+        for k = n, 2, -1 do
+            if h[k - 1].t <= targetT and targetT <= h[k].t then
+                local span = h[k].t - h[k - 1].t
+                return h[k - 1], h[k], (span > 0) and (targetT - h[k - 1].t) / span or 0
+            end
+        end
+        return h[n], h[n], 0
     end
 
     -- where the server thinks we are = our position `lookback` seconds ago.
@@ -821,36 +840,54 @@ do
         -- real position each frame and look back by that total time.
         local now = tick()
         local realRoot = rootPart.CFrame
+        -- root history (used by the fallback marker)
         pingHist[#pingHist + 1] = { t = now, cf = realRoot }
         while pingHist[1] and now - pingHist[1].t > 3 do table.remove(pingHist, 1) end
-        -- If a desync is spoofing/blocking your position, the server is NOT at
-        -- your ping-trailing real spot -- it's at the spoofed/frozen position.
-        -- Track that so the clone follows the desync, not you.
-        local desyncCF = hook.desync and hook.desync.getServerCFrame and hook.desync.getServerCFrame()
-        if desyncCF then
-            baseCF = desyncCF
-        else
-            local lookback = pingSeconds() + REPL_BUFFER
-            -- add the fake-lag delay ONLY while it's actually running
-            if hook.fakeLag and hook.fakeLag.isActive and hook.fakeLag.isActive() then
-                lookback = lookback + ((hook.fakeLag.getAmount and hook.fakeLag.getAmount() or 0) / 1000)
-            end
-            baseCF = sampleAt(now - lookback) or realRoot
-        end
+        -- pose history: snapshot every mirrored part's WORLD CFrame so the whole
+        -- animation can be replayed delayed (not just the position).
         if #cloneParts > 0 then
-            -- reproduce every limb relative to the live root -> the clone
-            -- animates and holds tools exactly like you, parked at the server spot
-            local rootInv = rootPart.CFrame:Inverse()
+            local poses = {}
+            for i = 1, #cloneParts do
+                local rp = cloneParts[i].real
+                poses[i] = (rp and rp.Parent) and rp.CFrame or false
+            end
+            poseHist[#poseHist + 1] = { t = now, poses = poses }
+            while poseHist[1] and now - poseHist[1].t > 3 do table.remove(poseHist, 1) end
+        end
+
+        -- total delay = network ping + replication buffer + fake-lag (when on)
+        local lookback = pingSeconds() + REPL_BUFFER
+        if hook.fakeLag and hook.fakeLag.isActive and hook.fakeLag.isActive() then
+            lookback = lookback + ((hook.fakeLag.getAmount and hook.fakeLag.getAmount() or 0) / 1000)
+        end
+        -- a desync overrides the position with the spoofed/frozen server spot
+        local desyncCF = hook.desync and hook.desync.getServerCFrame and hook.desync.getServerCFrame()
+
+        if #cloneParts > 0 then
             pcall(function()
-                for _, p in ipairs(cloneParts) do
-                    local rp = p.real
-                    if rp and rp.Parent then
-                        p.fake.CFrame = baseCF * (rootInv * rp.CFrame)
+                if desyncCF then
+                    -- desync: current pose parked at the spoofed/frozen position
+                    local rootInv = realRoot:Inverse()
+                    for _, p in ipairs(cloneParts) do
+                        local rp = p.real
+                        if rp and rp.Parent then p.fake.CFrame = desyncCF * (rootInv * rp.CFrame) end
+                    end
+                else
+                    -- replay the FULL delayed state: each part's world pose from
+                    -- `lookback` ago, so position AND animation lag together
+                    local a, b, f = bracketPose(now - lookback)
+                    for i, p in ipairs(cloneParts) do
+                        local ca = a and a.poses[i]
+                        local cb = b and b.poses[i]
+                        if ca and cb then p.fake.CFrame = ca:Lerp(cb, f)
+                        elseif cb then p.fake.CFrame = cb
+                        elseif ca then p.fake.CFrame = ca end
                     end
                 end
             end)
         else
-            pcall(function() clone:PivotTo(baseCF) end)   -- fallback marker
+            local cf = desyncCF or sampleAt(now - lookback) or realRoot
+            pcall(function() clone:PivotTo(cf) end)   -- fallback marker
         end
     end)
 end
