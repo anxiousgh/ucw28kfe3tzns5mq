@@ -258,6 +258,7 @@ local desyncMin, desyncMax = 5000, 20000
 local desyncEnableT
 local updateDesyncSliders   -- defined after the sliders exist; shows only the
                             -- sliders that belong to the currently chosen mode
+local setOrbitFromSelection -- assigned after the Players-tab selection helper exists
 local MODE_START = {
     Void     = function() hook.desync.startVoid()     return true end,
     Sky      = function() hook.desync.startSky()      return true end,
@@ -270,8 +271,9 @@ local MODE_START = {
     end,
     Freeze   = function() hook.desync.startFreeze() return true end,
     Custom   = function() hook.desync.startCustom() return true end,
+    Orbit    = function() hook.desync.startOrbit()  return true end,
 }
-regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet", "Freeze", "Custom" }, false, function(v)
+regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet", "Freeze", "Custom", "Orbit" }, false, function(v)
     desyncMode = v
     if updateDesyncSliders then updateDesyncSliders(v) end
     if desyncOn then
@@ -312,6 +314,18 @@ local txX = customBox("Custom X", "X position", function(n) customX = n end)
 local txY = customBox("Custom Y", "Y position", function(n) customY = n end)
 local txZ = customBox("Custom Z", "Z position", function(n) customZ = n end)
 
+-- Orbit mode: server position circles the Players-tab selected player while you
+-- keep moving locally. Pick a player in the Players tab, then lock it here.
+local orbitBtn = Desync:NewButton("Lock orbit to selected player", function()
+    if setOrbitFromSelection then setOrbitFromSelection() end
+end)
+local sOrbR = regSlider(Desync, "DesyncOrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
+    function(v) hook.desync.setOrbitRadius(v) end)
+local sOrbS = regDecimal(Desync, "DesyncOrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,
+    function(v) hook.desync.setOrbitSpeed(v) end)
+local sOrbH = regSlider(Desync, "DesyncOrbitHeight", "Orbit height", "", { min = -100, max = 100, default = 0 },
+    function(v) hook.desync.setOrbitHeight(v) end)
+
 -- only the controls the chosen desync mode actually uses are shown
 local DESYNC_SLIDERS = {
     Void     = { sMin, sMax },
@@ -321,9 +335,10 @@ local DESYNC_SLIDERS = {
     Raknet   = {},
     Freeze   = {},
     Custom   = { txX, txY, txZ },
+    Orbit    = { orbitBtn, sOrbR, sOrbS, sOrbH },
 }
 updateDesyncSliders = function(modeName)
-    for _, s in ipairs({ sMin, sMax, sSpin, sVel, sSky, txX, txY, txZ }) do
+    for _, s in ipairs({ sMin, sMax, sSpin, sVel, sSky, txX, txY, txZ, orbitBtn, sOrbR, sOrbS, sOrbH }) do
         if s and s.Hide then s:Hide() end
     end
     for _, s in ipairs(DESYNC_SLIDERS[modeName] or {}) do
@@ -437,6 +452,16 @@ local function selectedPlayer()
     end
     if not p then notify("Player not found: " .. tostring(plrSel), 2, "error") end
     return p
+end
+
+-- wired into the Desync tab's "Lock orbit to selected player" button (declared
+-- earlier; assigned here now that selectedPlayer exists)
+setOrbitFromSelection = function()
+    local p = selectedPlayer()
+    if p then
+        hook.desync.setOrbitTarget(p.Name)
+        notify("Orbit target: " .. dispName(p), 2, "success")
+    end
 end
 
 PlayersTab:NewButton("Follow", function() local p = selectedPlayer(); if p then hook.players.follow(p) end end)

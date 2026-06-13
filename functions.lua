@@ -3152,10 +3152,16 @@ F.desync = (function()
     local SHARED = getgenv()._F_DESYNC_STATE
 
     local active   = false
-    local mode     = "off"   -- "void"|"voidspam"|"sky"|"spin"|"velocity"|"raknet"|"invisible"|"freeze"|"custom"|"off"
+    local mode     = "off"   -- "void"|"voidspam"|"sky"|"spin"|"velocity"|"raknet"|"invisible"|"freeze"|"custom"|"orbit"|"off"
     local _invisBase  -- cluster center for invisible mode (picked once per session)
     local _freezeCF   -- captured HRP CFrame at the moment freeze mode is enabled
     local _customPos = Vector3.new(0, 0, 0)  -- user-chosen server position (custom mode)
+    -- orbit mode: server position circles a target player while you move locally
+    local _orbitName   = nil   -- target player's Name (resolved live each frame)
+    local _orbitRadius = 8
+    local _orbitSpeed  = 4      -- degrees per heartbeat
+    local _orbitHeight = 0
+    local _orbitAngle  = 0
     local realCF, realLV, realAV
     local syncEnd  = 0
     local hbConn
@@ -3219,6 +3225,19 @@ F.desync = (function()
             -- server sees us at the user-chosen X/Y/Z (keep our real rotation)
             local rot = hrp.CFrame - hrp.CFrame.Position
             hrp.CFrame = CFrame.new(_customPos) * rot
+        elseif mode == "orbit" then
+            -- server position circles a target player. If the target is gone
+            -- this frame, leave the real CFrame (no spoof) so we never snap to 0,0,0
+            local tgt  = _orbitName and game:GetService("Players"):FindFirstChild(_orbitName)
+            local tc   = tgt and tgt.Character
+            local thrp = tc and tc:FindFirstChild("HumanoidRootPart")
+            if thrp then
+                _orbitAngle = (_orbitAngle + _orbitSpeed) % 360
+                local a   = math.rad(_orbitAngle)
+                local off = Vector3.new(math.cos(a) * _orbitRadius, _orbitHeight, math.sin(a) * _orbitRadius)
+                local rot = hrp.CFrame - hrp.CFrame.Position
+                hrp.CFrame = CFrame.new(thrp.Position + off) * rot
+            end
         end
     end
 
@@ -3585,6 +3604,13 @@ F.desync = (function()
             _customPos = Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
         end,
         getCustomPos    = function() return _customPos end,
+        -- orbit: server position circles a target player while you move locally
+        startOrbit      = function() startMode("orbit") end,
+        setOrbitTarget  = function(name) _orbitName = name and tostring(name) or nil; _orbitAngle = 0 end,
+        getOrbitTarget  = function() return _orbitName end,
+        setOrbitRadius  = function(n) _orbitRadius = math.clamp(tonumber(n) or 8, 0, 1000) end,
+        setOrbitSpeed   = function(n) _orbitSpeed  = math.clamp(tonumber(n) or 4, 0, 90) end,
+        setOrbitHeight  = function(n) _orbitHeight = math.clamp(tonumber(n) or 0, -1000, 1000) end,
         stop            = stopAll,
         isRaknetAvailable = function() return findRaknet() ~= nil end,
         isActive        = function() return active end,
