@@ -692,10 +692,11 @@ do
                     -- mesh textures sit on top of the material -> clear them
                     if d:IsA("MeshPart") then pcall(function() d.TextureID = "" end) end
                 elseif d:IsA("SpecialMesh") then
-                    -- legacy file/head meshes (R6 head, old hats) IGNORE Material,
-                    -- so they never go neon/forcefield. Drop them -> the part
-                    -- renders as primitive geometry that DOES respect the material.
-                    pcall(function() d:Destroy() end)
+                    -- legacy file/head meshes (R6 head, old hats) keep their SHAPE
+                    -- but ignore Material, so they show a flat colour instead of
+                    -- the neon/forcefield glow. Clear the texture + vertex tint so
+                    -- they at least take the chosen colour (not the original).
+                    pcall(function() d.TextureId = ""; d.VertexColor = Vector3.new(1, 1, 1) end)
                 -- decals, clothing, PBR surfaces and scripts all hide/override the
                 -- material; strip them so the chosen look shows on every part (hair too)
                 elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SurfaceAppearance")
