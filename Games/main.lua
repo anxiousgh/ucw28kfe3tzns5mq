@@ -656,34 +656,52 @@ do
         local ok, c = pcall(function() return char:Clone() end)
         char.Archivable = prevArch
         if ok and c then
+            -- Pair clone parts to real parts BY INDEX first: c is an exact deep
+            -- copy of char, so both GetDescendants() lists hold the matching
+            -- instances in the SAME order. Pairing by position avoids the
+            -- name-collision bug where two same-named accessory parts ("Handle")
+            -- both resolved to the first real one -> a clone accessory mirroring
+            -- the WRONG part (the intermittent jumbled-accessory positions).
+            cloneParts = {}
+            local wanted = wantedRealParts(char)
+            local keep = {}   -- [cloneBasePart] = true
+            local cd, rd = c:GetDescendants(), char:GetDescendants()
+            if #cd == #rd then
+                for i = 1, #cd do
+                    if cd[i]:IsA("BasePart") and wanted[rd[i]] then
+                        cloneParts[#cloneParts + 1] = { real = rd[i], fake = cd[i] }
+                        keep[cd[i]] = true
+                    end
+                end
+            else
+                -- structure diverged (rare) -> fall back to name-path matching
+                for _, d in ipairs(cd) do
+                    if d:IsA("BasePart") then
+                        local realPart = resolve(char, relPath(d, c))
+                        if realPart and wanted[realPart] then
+                            cloneParts[#cloneParts + 1] = { real = realPart, fake = d }
+                            keep[d] = true
+                        end
+                    end
+                end
+            end
+            -- strip the clone so the chosen material shows on EVERY kept part
             for _, d in ipairs(c:GetDescendants()) do
                 if d:IsA("BasePart") then
                     d.Anchored = true; d.CanCollide = false; d.CanQuery = false; d.CastShadow = false
                     -- mesh textures sit on top of the material -> clear them
                     if d:IsA("MeshPart") then pcall(function() d.TextureID = "" end) end
                 elseif d:IsA("SpecialMesh") then
-                    pcall(function() d.TextureId = ""; d.VertexColor = Vector3.new(1, 1, 1) end)
+                    -- legacy file/head meshes (R6 head, old hats) IGNORE Material,
+                    -- so they never go neon/forcefield. Drop them -> the part
+                    -- renders as primitive geometry that DOES respect the material.
+                    pcall(function() d:Destroy() end)
                 -- decals, clothing, PBR surfaces and scripts all hide/override the
                 -- material; strip them so the chosen look shows on every part (hair too)
                 elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SurfaceAppearance")
                     or d:IsA("Shirt") or d:IsA("Pants") or d:IsA("ShirtGraphic")
                     or d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Humanoid") then
                     pcall(function() d:Destroy() end)
-                end
-            end
-            -- pair every WANTED clone part with its live counterpart: only the
-            -- rig's body parts (R15/R6) + accessory/tool parts. Anything else --
-            -- e.g. a CUFF welded inside RightLowerArm -- is dropped from the clone.
-            cloneParts = {}
-            local wanted = wantedRealParts(char)
-            local keep = {}   -- [cloneBasePart] = true
-            for _, d in ipairs(c:GetDescendants()) do
-                if d:IsA("BasePart") then
-                    local realPart = resolve(char, relPath(d, c))
-                    if realPart and wanted[realPart] then
-                        cloneParts[#cloneParts + 1] = { real = realPart, fake = d }
-                        keep[d] = true
-                    end
                 end
             end
             for _, d in ipairs(c:GetDescendants()) do
