@@ -649,12 +649,23 @@ do
         local char = LocalPlr.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if not char or not root then return end
-        -- character models are often Archivable=false (can't be cloned);
-        -- flip it on temporarily so :Clone() actually returns something
+        -- Flip Archivable on the char AND every descendant so Clone() copies
+        -- EVERYTHING. If any accessory part stays Archivable=false it's dropped
+        -- from the clone, the clone/real descendant lists diverge, and we fall
+        -- back to the buggy name matching -> jumbled accessory positions. Restore
+        -- the flags right after the clone.
         local prevArch = char.Archivable
+        local flipped  = {}
         char.Archivable = true
+        for _, d in ipairs(char:GetDescendants()) do
+            if not d.Archivable then
+                d.Archivable = true
+                flipped[#flipped + 1] = d
+            end
+        end
         local ok, c = pcall(function() return char:Clone() end)
         char.Archivable = prevArch
+        for _, d in ipairs(flipped) do pcall(function() d.Archivable = false end) end
         if ok and c then
             -- Pair clone parts to real parts BY INDEX first: c is an exact deep
             -- copy of char, so both GetDescendants() lists hold the matching
