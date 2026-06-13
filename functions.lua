@@ -607,6 +607,7 @@ end
 --  SPIN / FLIP / ICE / BLINK
 local function stopFlip()
     G.flipActive=false
+    getgenv()._F_DESYNC_SENT_CF=nil   -- stop feeding the server-pos visualizer
     if G._flipHb then G._flipHb:Disconnect(); G._flipHb=nil end
     if G._flipRs then G._flipRs:Disconnect(); G._flipRs=nil end
     pcall(function() RunService:UnbindFromRenderStep("FlipRestore") end)
@@ -634,6 +635,7 @@ local function startFlip()
             local look=hrp.CFrame.LookVector
             local yaw=math.atan2(look.X,look.Z)
             hrp.CFrame=CFrame.new(hrp.Position)*CFrame.fromEulerAnglesYXZ(0,yaw,0)*CFrame.Angles(math.pi,0,0)
+            getgenv()._F_DESYNC_SENT_CF=hrp.CFrame  -- expose the spoofed pose to the server-pos visualizer
         end)
         -- restore at First priority so the default camera sees the upright
         RunService:BindToRenderStep("FlipRestore", Enum.RenderPriority.First.Value, function()
@@ -652,6 +654,7 @@ end
 -- ---- Tilt 90° (sideways roll) ----
 local function stopTilt()
     G.tiltActive=false
+    getgenv()._F_DESYNC_SENT_CF=nil   -- stop feeding the server-pos visualizer
     if G._tiltHb then G._tiltHb:Disconnect(); G._tiltHb=nil end
     pcall(function() RunService:UnbindFromRenderStep("TiltRestore") end)
     if G._tiltCharConn then G._tiltCharConn:Disconnect(); G._tiltCharConn=nil end
@@ -678,6 +681,7 @@ local function startTilt()
             local yaw=math.atan2(look.X,look.Z)
             -- preserve yaw, tilt 90° on Z (sideways)
             hrp.CFrame=CFrame.new(hrp.Position)*CFrame.fromEulerAnglesYXZ(0,yaw,0)*CFrame.Angles(0,0,math.pi/2)
+            getgenv()._F_DESYNC_SENT_CF=hrp.CFrame  -- expose the spoofed pose to the server-pos visualizer
         end)
         RunService:BindToRenderStep("TiltRestore", Enum.RenderPriority.First.Value, function()
             if _spoofing and _real[1] then
@@ -3535,12 +3539,13 @@ F.desync = (function()
         isRaknetAvailable = function() return findRaknet() ~= nil end,
         isActive        = function() return active end,
         getMode         = function() return mode end,
-        -- where the server currently has you while a desync is running (spoofed
-        -- position for move modes, frozen spot for raknet). nil when off. Used by
-        -- the server-pos visualizer so it tracks the desync instead of you.
+        -- where the server currently has you while a position spoof is running
+        -- (desync move modes, raknet freeze, OR the Upside-down / Tilt-sideways
+        -- movement tricks - they all write _F_DESYNC_SENT_CF and clear it on stop).
+        -- nil when nothing is spoofing. Used by the server-pos visualizer so it
+        -- tracks the spoofed pose instead of your local (restored) one.
         getServerCFrame = function()
-            if active and mode ~= "off" then return getgenv()._F_DESYNC_SENT_CF end
-            return nil
+            return getgenv()._F_DESYNC_SENT_CF
         end,
         setRange        = function(minV, maxV)
             VOID_MIN = math.max(100, tonumber(minV) or VOID_MIN)
