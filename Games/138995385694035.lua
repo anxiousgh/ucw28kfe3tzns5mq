@@ -3083,12 +3083,26 @@ do
     local wiredClose
     local function wireClose(mp)
         local cb = mp and mp:FindFirstChild("CloseButton")
-        if cb and cb:IsA("GuiButton") and cb ~= wiredClose then
-            wiredClose = cb
+        if not cb or cb == wiredClose then return end
+        wiredClose = cb
+        local function close()
+            local p = getModPanel()
+            if p then pcall(function() p.Visible = false end) end
+        end
+        -- CloseButton may BE a GuiButton, or a Frame/Image wrapping one
+        local btn = cb:IsA("GuiButton") and cb or cb:FindFirstChildWhichIsA("GuiButton", true)
+        if btn then
+            pcall(function() btn.Active = true end)
+            btn.MouseButton1Click:Connect(close)
+            pcall(function() btn.Activated:Connect(close) end)
+        else
+            -- not a button -> catch the click via raw input on the element
             pcall(function() cb.Active = true end)
-            cb.MouseButton1Click:Connect(function()
-                local p = getModPanel()
-                if p then pcall(function() p.Visible = false end) end
+            cb.InputBegan:Connect(function(input)
+                local t = input.UserInputType
+                if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
+                    close()
+                end
             end)
         end
     end
