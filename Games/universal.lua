@@ -73,8 +73,19 @@ regDropdown(Aim, "CamHitPart", "Hit part", cs.TargetPart or "Head",
     { "Head", "HumanoidRootPart", "UpperTorso", "Random" }, false, function(v) cam.setHitPart(v) end)
 -- Mouse = move the mouse toward the target (works in 3rd person, needs an
 -- executor with mousemoverel); Camera = steer the camera toward the target
+local clanningT   -- forward ref: Mouse-mode-only toggle, shown/hidden by Mode
 regDropdown(Aim, "CamMode", "Mode", cs.Mode or "Mouse",
-    { "Mouse", "Camera" }, false, function(v) cam.setMode(v) end)
+    { "Mouse", "Camera" }, false, function(v)
+        cam.setMode(v)
+        if clanningT then
+            if v == "Mouse" then clanningT:Show() else clanningT:Hide() end
+        end
+    end)
+-- Clanning: in Mouse mode only, stand down while YOU are aiming (1st person,
+-- shiftlock, or right-click held) so the aimbot never fights your manual aim.
+clanningT = regToggle(Aim, "CamClanning", "Clanning (off in 1st person / shiftlock / RMB)",
+    cs.Clanning or false, function(v) cam.setClanning(v) end)
+if (cs.Mode or "Mouse") ~= "Mouse" then clanningT:Hide() end
 
 regSlider(Aim, "CamFov", "FOV radius", "", { min = 1, max = 2000, default = cs.FOVRadius or 200 },
     function(v) cam.setFov(v) end)

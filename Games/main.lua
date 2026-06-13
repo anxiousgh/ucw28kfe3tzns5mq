@@ -167,7 +167,7 @@ local function regColor(tab, key, text, default, apply)
 end
 -- Xsx slider is integer-only; present an int range, apply value/scale.
 local function regDecimal(tab, key, text, suffix, dmin, dmax, ddefault, scale, apply)
-    regSlider(tab, key, text, suffix,
+    return regSlider(tab, key, text, suffix,
         { min = math.floor(dmin * scale), max = math.floor(dmax * scale), default = math.floor(ddefault * scale) },
         function(v) apply(v / scale) end)
 end
@@ -256,6 +256,8 @@ Desync:NewSection("Desync")
 local desyncMode, desyncOn = "Void", false
 local desyncMin, desyncMax = 5000, 20000
 local desyncEnableT
+local updateDesyncSliders   -- defined after the sliders exist; shows only the
+                            -- sliders that belong to the currently chosen mode
 local MODE_START = {
     Void     = function() hook.desync.startVoid()     return true end,
     Sky      = function() hook.desync.startSky()      return true end,
@@ -269,6 +271,7 @@ local MODE_START = {
 }
 regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet" }, false, function(v)
     desyncMode = v
+    if updateDesyncSliders then updateDesyncSliders(v) end
     if desyncOn then
         hook.desync.stop()
         local starter = MODE_START[v]
@@ -285,14 +288,32 @@ desyncEnableT = regToggle(Desync, "DesyncEnabled", "Enable desync", false, funct
     end
 end)
 desyncEnableT:AddKeybind(Enum.KeyCode.G, "Desync Toggle")
-regSlider(Desync, "DesyncMin", "Void min distance", "", { min = 500, max = 100000, default = 5000 },
+local sMin = regSlider(Desync, "DesyncMin", "Void min distance", "", { min = 500, max = 100000, default = 5000 },
     function(v) desyncMin = v; hook.desync.setRange(desyncMin, desyncMax) end)
-regSlider(Desync, "DesyncMax", "Void max distance", "", { min = 500, max = 100000, default = 20000 },
+local sMax = regSlider(Desync, "DesyncMax", "Void max distance", "", { min = 500, max = 100000, default = 20000 },
     function(v) desyncMax = v; hook.desync.setRange(desyncMin, desyncMax) end)
 -- much slower range now (0.1-30 deg/frame) so the spin is actually visible
-regDecimal(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", 0.1, 30, 2, 10, function(v) hook.desync.setSpinSpeed(v) end)
-regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
-regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
+local sSpin = regDecimal(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", 0.1, 30, 2, 10, function(v) hook.desync.setSpinSpeed(v) end)
+local sVel = regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
+local sSky = regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
+
+-- only the sliders that the chosen desync mode actually uses are shown
+local DESYNC_SLIDERS = {
+    Void     = { sMin, sMax },
+    Sky      = { sSky },
+    Spin     = { sSpin },
+    Velocity = { sVel },
+    Raknet   = {},
+}
+updateDesyncSliders = function(modeName)
+    for _, s in ipairs({ sMin, sMax, sSpin, sVel, sSky }) do
+        if s and s.Hide then s:Hide() end
+    end
+    for _, s in ipairs(DESYNC_SLIDERS[modeName] or {}) do
+        if s and s.Show then s:Show() end
+    end
+end
+updateDesyncSliders(desyncMode)   -- initial state for the default mode (Void)
 
 -- ---- fake lag (in the Desync tab, below the desync section, no keybind) ----
 Desync:NewSection("Fake lag")

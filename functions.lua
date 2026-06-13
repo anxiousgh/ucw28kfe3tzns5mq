@@ -61,6 +61,7 @@ local CamLockSettings = {
     Prediction=false, PredictionAmount=0.165,
     Smoothing=0.25, Sticky=true,
     ToolCheck=false, OnlyVisible=false, OnlyFirstPerson=false,
+    Clanning=false,
 }
 
 local TrigSettings = {
@@ -1339,6 +1340,18 @@ _lockApi = {
     setLineColor      = function(c) if typeof(c) == "Color3" then _lockLineColor = c end end,
 }
 
+-- first person = the camera sits (almost) inside our head, or the player is
+-- forced into first person. Used by "Clanning" to stand down while you aim.
+local function clIsFirstPerson()
+    local cam = workspace.CurrentCamera
+    local char = lplr.Character
+    local head = char and char:FindFirstChild("Head")
+    if cam and head and (cam.CFrame.Position - head.Position).Magnitude < 1.5 then
+        return true
+    end
+    return lplr.CameraMode == Enum.CameraMode.LockFirstPerson
+end
+
 RunService.RenderStepped:Connect(function(dt)
     -- Fast early-out: skip the entire camlock per-frame when nothing
     if not CamLockSettings.Enabled and not CamLockSettings.ShowFOV then
@@ -1356,6 +1369,17 @@ RunService.RenderStepped:Connect(function(dt)
     end
     if not CamLockSettings.Enabled then clStickyTarget = nil; return end
     if G.freecamActive then return end
+    -- "Clanning" (Mouse mode only): stand down while you're aiming yourself, so
+    -- the aimbot never fights your manual aim in a clan fight - no lock in 1st
+    -- person, shiftlock (both lock the mouse to centre), or while holding RMB.
+    if CamLockSettings.Clanning and CamLockSettings.Mode == "Mouse" then
+        if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+            or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+            or clIsFirstPerson() then
+            clStickyTarget = nil
+            return
+        end
+    end
     -- "Only in 1st Person": only lock when the mouse is locked to center
     if CamLockSettings.OnlyFirstPerson
         and not (UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
@@ -2703,6 +2727,7 @@ F.camLock = {
     setToolCheck    = function(b) CamLockSettings.ToolCheck = b == true end,
     setOnlyVisible  = function(b) CamLockSettings.OnlyVisible = b == true end,
     setOnlyFirstPerson = function(b) CamLockSettings.OnlyFirstPerson = b == true end,
+    setClanning = function(b) CamLockSettings.Clanning = b == true end,
 }
 
 -- triggerbot
