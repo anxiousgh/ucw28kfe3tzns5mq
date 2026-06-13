@@ -2820,6 +2820,7 @@ Target:NewButton("TP shoot", tpShoot)
     :AddButton("Goto", gotoTarget)
 Target:NewButton("Bring", bring)
 Target:NewKeybind("TP shoot key", Enum.KeyCode.K, tpShoot)
+Target:NewKeybind("Goto key", Enum.KeyCode.T, gotoTarget)
 
 -- Visualization: ragebot target line + outline for the locked target
 Target:NewSection("Visualization")
