@@ -3110,7 +3110,7 @@ F.desync = (function()
     local VOIDSPAM_MIN = 5000
     local VOIDSPAM_MAX = 10000
     local SHOT_SYNC_MS = 100
-    local SPIN_STEP    = 47
+    local SPIN_STEP    = 2     -- deg/frame; slow so the spin is actually visible
     local VEL_MAGNITUDE = 16384
     -- sky desync: how many studs to shove HRP up server-side (X/Z preserved)
     local SKY_HEIGHT   = 5000
@@ -3571,7 +3571,7 @@ F.desync = (function()
         end,
         getSyncVisualEnabled = function() return syncVisualEnabled end,
         setSpinSpeed    = function(n)
-            SPIN_STEP = math.clamp(tonumber(n) or 47, 1, 360)
+            SPIN_STEP = math.clamp(tonumber(n) or 2, 0.1, 360)
         end,
         setVelocityMag  = function(n)
             VEL_MAGNITUDE = math.max(1, tonumber(n) or 16384)

@@ -289,7 +289,8 @@ regSlider(Desync, "DesyncMin", "Void min distance", "", { min = 500, max = 10000
     function(v) desyncMin = v; hook.desync.setRange(desyncMin, desyncMax) end)
 regSlider(Desync, "DesyncMax", "Void max distance", "", { min = 500, max = 100000, default = 20000 },
     function(v) desyncMax = v; hook.desync.setRange(desyncMin, desyncMax) end)
-regSlider(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", { min = 1, max = 360, default = 47 }, function(v) hook.desync.setSpinSpeed(v) end)
+-- much slower range now (0.1-30 deg/frame) so the spin is actually visible
+regDecimal(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", "", 0.1, 30, 2, 10, function(v) hook.desync.setSpinSpeed(v) end)
 regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
 regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
 
