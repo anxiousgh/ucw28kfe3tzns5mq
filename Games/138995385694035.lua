@@ -3063,3 +3063,48 @@ end)
 
 -- shared tabs (Movement/Desync/Visuals/World/Misc/Settings/Config) below
 api.buildShared()
+
+-- ============================================================
+--  MOD PANEL  (added to the shared Misc tab)
+--  Opens HC's hidden moderator panel: set MOD_PANEL.Active = true, then
+--  a button + keybind toggle its Visible. Also wires its CloseButton.
+-- ============================================================
+do
+    local plr  = game:GetService("Players").LocalPlayer
+    local Misc = api.miscTab
+
+    local function getModPanel()
+        local pg = plr:FindFirstChild("PlayerGui")
+        local ms = pg and pg:FindFirstChild("Main Screen")
+        return ms and ms:FindFirstChild("MOD_PANEL")
+    end
+
+    -- wire the panel's CloseButton so clicking it actually hides the panel
+    local wiredClose
+    local function wireClose(mp)
+        local cb = mp and mp:FindFirstChild("CloseButton")
+        if cb and cb:IsA("GuiButton") and cb ~= wiredClose then
+            wiredClose = cb
+            pcall(function() cb.Active = true end)
+            cb.MouseButton1Click:Connect(function()
+                local p = getModPanel()
+                if p then pcall(function() p.Visible = false end) end
+            end)
+        end
+    end
+
+    -- "open" the panel = make it Active (interactive); then flip Visible
+    local function toggleModPanel()
+        local mp = getModPanel()
+        if not mp then notify("Mod panel not found (Main Screen not loaded?)", 3, "alert"); return end
+        pcall(function() mp.Active = true end)
+        wireClose(mp)
+        pcall(function() mp.Visible = not mp.Visible end)
+    end
+
+    if Misc then
+        Misc:NewSection("Mod panel")
+        Misc:NewButton("Toggle mod panel", toggleModPanel)
+        Misc:NewKeybind("Mod panel toggle", Enum.KeyCode.K, function() toggleModPanel() end)
+    end
+end

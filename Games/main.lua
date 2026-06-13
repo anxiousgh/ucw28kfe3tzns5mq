@@ -918,6 +918,7 @@ regSlider(World, "Fov", "FOV", "", { min = 30, max = 120, default = math.floor(h
 --  MISC
 -- ============================================================
 local Misc = Window:NewTab("Misc")
+ctx.api.miscTab = Misc   -- exposed so per-game modules can add to the shared Misc tab
 Misc:NewSection("Anti-fling")
 regToggle(Misc, "AntiFling", "Anti-fling", false, function(v) if v then hook.antiFling.start() else hook.antiFling.stop() end end)
 regSlider(Misc, "AntiFlingCap", "Velocity cap", " stud/sec", { min = 100, max = 50000, default = 5000 }, function(v) hook.antiFling.setCap(v) end)
