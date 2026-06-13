@@ -268,8 +268,10 @@ local MODE_START = {
         if not ok then notify("Raknet desync unavailable: executor doesn't expose `raknet`", 5, "error") end
         return ok
     end,
+    Freeze   = function() hook.desync.startFreeze() return true end,
+    Custom   = function() hook.desync.startCustom() return true end,
 }
-regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet" }, false, function(v)
+regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet", "Freeze", "Custom" }, false, function(v)
     desyncMode = v
     if updateDesyncSliders then updateDesyncSliders(v) end
     if desyncOn then
@@ -297,16 +299,31 @@ local sSpin = regDecimal(Desync, "DesyncSpinSpeed", "Spin speed (deg/frame)", ""
 local sVel = regSlider(Desync, "DesyncVelMag", "Velocity magnitude", "", { min = 100, max = 100000, default = 16384 }, function(v) hook.desync.setVelocityMag(v) end)
 local sSky = regSlider(Desync, "DesyncSkyHeight", "Sky height", "", { min = 50, max = 100000, default = 5000 }, function(v) hook.desync.setSkyHeight(v) end)
 
--- only the sliders that the chosen desync mode actually uses are shown
+-- Custom mode: type the exact server position (X / Y / Z). Parsed as numbers
+-- (negatives + decimals allowed); a bad entry just keeps the previous value.
+local customX, customY, customZ = 0, 0, 0
+local function pushCustom() hook.desync.setCustomPos(customX, customY, customZ) end
+local function customBox(label, place, apply)
+    return Desync:NewTextbox(label, "0", place, "all", "small", true, false, function(t)
+        local n = tonumber(t); if n then apply(n); pushCustom() end
+    end)
+end
+local txX = customBox("Custom X", "X position", function(n) customX = n end)
+local txY = customBox("Custom Y", "Y position", function(n) customY = n end)
+local txZ = customBox("Custom Z", "Z position", function(n) customZ = n end)
+
+-- only the controls the chosen desync mode actually uses are shown
 local DESYNC_SLIDERS = {
     Void     = { sMin, sMax },
     Sky      = { sSky },
     Spin     = { sSpin },
     Velocity = { sVel },
     Raknet   = {},
+    Freeze   = {},
+    Custom   = { txX, txY, txZ },
 }
 updateDesyncSliders = function(modeName)
-    for _, s in ipairs({ sMin, sMax, sSpin, sVel, sSky }) do
+    for _, s in ipairs({ sMin, sMax, sSpin, sVel, sSky, txX, txY, txZ }) do
         if s and s.Hide then s:Hide() end
     end
     for _, s in ipairs(DESYNC_SLIDERS[modeName] or {}) do

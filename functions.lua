@@ -3152,8 +3152,10 @@ F.desync = (function()
     local SHARED = getgenv()._F_DESYNC_STATE
 
     local active   = false
-    local mode     = "off"   -- "void"|"voidspam"|"sky"|"spin"|"velocity"|"raknet"|"invisible"|"off"
+    local mode     = "off"   -- "void"|"voidspam"|"sky"|"spin"|"velocity"|"raknet"|"invisible"|"freeze"|"custom"|"off"
     local _invisBase  -- cluster center for invisible mode (picked once per session)
+    local _freezeCF   -- captured HRP CFrame at the moment freeze mode is enabled
+    local _customPos = Vector3.new(0, 0, 0)  -- user-chosen server position (custom mode)
     local realCF, realLV, realAV
     local syncEnd  = 0
     local hbConn
@@ -3208,6 +3210,15 @@ F.desync = (function()
                 (math.random() * 2 - 1) * r
             )
             hrp.CFrame = CFrame.new(_invisBase + jitter)
+        elseif mode == "freeze" then
+            -- server stays pinned at wherever we were when freeze was enabled,
+            -- no matter where we actually walk locally
+            if not _freezeCF then _freezeCF = hrp.CFrame end
+            hrp.CFrame = _freezeCF
+        elseif mode == "custom" then
+            -- server sees us at the user-chosen X/Y/Z (keep our real rotation)
+            local rot = hrp.CFrame - hrp.CFrame.Position
+            hrp.CFrame = CFrame.new(_customPos) * rot
         end
     end
 
@@ -3436,6 +3447,12 @@ F.desync = (function()
         SHARED.mode   = newMode
         -- watchdog flag: tells the periodic re-asserter to keep SHARED in
         getgenv()._F_DESYNC_RAKNET_WANTED = (newMode == "raknet")
+        if newMode == "freeze" then
+            -- capture the spot to pin the server at (recaptured every enable)
+            local c = lplr.Character
+            local hrp = c and c:FindFirstChild("HumanoidRootPart")
+            _freezeCF = hrp and hrp.CFrame or nil
+        end
         if newMode == "raknet" then
             if hbConn then hbConn:Disconnect(); hbConn = nil end
             pcall(function() RunService:UnbindFromRenderStep(RESTORE_BIND) end)
@@ -3484,6 +3501,7 @@ F.desync = (function()
             end)
         end
         realCF, realLV, realAV = nil, nil, nil
+        _freezeCF = nil   -- next freeze enable recaptures the spot
         getgenv()._F_DESYNC_SENT_CF = nil
         getgenv()._F_DESYNC_FROZEN  = nil
         mode = "off"
@@ -3560,6 +3578,13 @@ F.desync = (function()
             _invisBase = nil  -- fresh cluster center every enable
             startMode("invisible")
         end,
+        -- freeze: server stays where you turned it on; custom: server at X/Y/Z
+        startFreeze     = function() startMode("freeze") end,
+        startCustom     = function() startMode("custom") end,
+        setCustomPos    = function(x, y, z)
+            _customPos = Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
+        end,
+        getCustomPos    = function() return _customPos end,
         stop            = stopAll,
         isRaknetAvailable = function() return findRaknet() ~= nil end,
         isActive        = function() return active end,
