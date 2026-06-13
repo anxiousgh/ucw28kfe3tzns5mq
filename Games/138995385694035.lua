@@ -2502,10 +2502,28 @@ local function targetPart(p)
     return ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Head")
 end
 
+local hcLabelToPlayer = {}
+local function hcDisp(p)
+    local d = p.DisplayName
+    return (d and d ~= "" and d) or p.Name
+end
+-- "Display name (@username)", sorted A-Z by display name
 local function playerNames()
-    local names = {}
+    local plrs = {}
     for _, p in ipairs(hook.players.list()) do
-        if p ~= LocalPlayer then names[#names + 1] = p.Name end
+        if p ~= LocalPlayer then plrs[#plrs + 1] = p end
+    end
+    table.sort(plrs, function(a, b)
+        local da, db = hcDisp(a):lower(), hcDisp(b):lower()
+        if da == db then return a.Name:lower() < b.Name:lower() end
+        return da < db
+    end)
+    hcLabelToPlayer = {}
+    local names = {}
+    for _, p in ipairs(plrs) do
+        local label = string.format("%s (@%s)", hcDisp(p), p.Name)
+        names[#names + 1] = label
+        hcLabelToPlayer[label] = p
     end
     if #names == 0 then names = { "(none)" } end
     return names
@@ -2570,9 +2588,12 @@ Target:NewButton("Add closest", addClosestTarget)
 local tDrop = Target:NewDropdown("Players", nil, playerNames(), true, function(picked)
     rb.unlock()
     if type(picked) == "table" then
-        for _, name in ipairs(picked) do
-            if name ~= "(none)" then
-                local p = hook.players.find(name)
+        for _, label in ipairs(picked) do
+            if label ~= "(none)" then
+                local p = hcLabelToPlayer[label]
+                if not p or not p.Parent then
+                    p = hook.players.find(label:match("@([%w_]+)%)%s*$") or label)
+                end
                 if p then rb.addTarget(p) end
             end
         end
@@ -2586,7 +2607,7 @@ task.spawn(function()
     while not library.Unloaded do
         local list = rb.getTargetList()
         local names = {}
-        for _, p in ipairs(list) do names[#names + 1] = p.Name end
+        for _, p in ipairs(list) do names[#names + 1] = hcDisp(p) end
         local sig = table.concat(names, ",")
         if sig ~= last then
             last = sig

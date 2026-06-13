@@ -336,10 +336,31 @@ local PlayersTab = Window:NewTab("Players")
 PlayersTab:NewSection("Players")
 
 local LocalPlr = game:GetService("Players").LocalPlayer
+local labelToPlayer = {}   -- "Display name (@username)" -> Player
+local function dispName(p)
+    local d = p.DisplayName
+    return (d and d ~= "" and d) or p.Name
+end
+local function fmtLabel(p)
+    return string.format("%s (@%s)", dispName(p), p.Name)
+end
+-- options shown as "Display name (@username)", sorted A-Z by display name
 local function playerNameList()
-    local names = {}
+    local plrs = {}
     for _, p in ipairs(hook.players.list()) do
-        if p ~= LocalPlr then names[#names + 1] = p.Name end
+        if p ~= LocalPlr then plrs[#plrs + 1] = p end
+    end
+    table.sort(plrs, function(a, b)
+        local da, db = dispName(a):lower(), dispName(b):lower()
+        if da == db then return a.Name:lower() < b.Name:lower() end
+        return da < db
+    end)
+    labelToPlayer = {}
+    local names = {}
+    for _, p in ipairs(plrs) do
+        local label = fmtLabel(p)
+        names[#names + 1] = label
+        labelToPlayer[label] = p
     end
     if #names == 0 then names = { "(none)" } end
     return names
@@ -370,7 +391,11 @@ Players.PlayerRemoving:Connect(function() task.defer(refreshPlayerList) end)
 
 local function selectedPlayer()
     if not plrSel or plrSel == "(none)" then notify("Select a player first", 2, "alert"); return nil end
-    local p = hook.players.find(plrSel)
+    local p = labelToPlayer[plrSel]
+    if not p or not p.Parent then
+        -- fallback: pull the @username out of the label and look it up
+        p = hook.players.find(plrSel:match("@([%w_]+)%)%s*$") or plrSel)
+    end
     if not p then notify("Player not found: " .. tostring(plrSel), 2, "error") end
     return p
 end
