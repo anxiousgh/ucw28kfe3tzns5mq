@@ -935,58 +935,106 @@ local function fxInstance(class, name)
     local inst = Instance.new(class); inst.Name = name; inst.Enabled = false; inst.Parent = Lighting
     return inst
 end
-local CC      = fxInstance("ColorCorrectionEffect", "_wh_cc")
-local Bloom   = fxInstance("BloomEffect",           "_wh_bloom")
-local Blur    = fxInstance("BlurEffect",            "_wh_blur")
-local SunRays = fxInstance("SunRaysEffect",         "_wh_sunrays")
+-- effects are re-acquirable: if the game wipes Lighting on respawn, recreate them
+local CC, Bloom, Blur, SunRays
+local function ensureFx()
+    CC      = fxInstance("ColorCorrectionEffect", "_wh_cc")
+    Bloom   = fxInstance("BloomEffect",           "_wh_bloom")
+    Blur    = fxInstance("BlurEffect",            "_wh_blur")
+    SunRays = fxInstance("SunRaysEffect",         "_wh_sunrays")
+end
+ensureFx()
+
+-- Persistence: every World control the user CHANGES registers a closure that
+-- re-applies its current value. On respawn (HC resets the lighting) we recreate
+-- the effects + replay those closures so the changes stick. Untouched controls
+-- never register, so the game's own day/night etc. is left alone.
+-- W: for sliders/toggles (their callback only fires on a real change).
+-- Wc: for colorpickers (they ALSO fire once on creation -> skip that first call
+--     so the default colour doesn't get pinned).
+local worldReapply = {}
+local function W(applyFn)
+    return function(v)
+        worldReapply[applyFn] = function() pcall(applyFn, v) end
+        pcall(applyFn, v)
+    end
+end
+local function Wc(applyFn)
+    local first = true
+    return function(c)
+        if first then first = false; pcall(applyFn, c); return end
+        worldReapply[applyFn] = function() pcall(applyFn, c) end
+        pcall(applyFn, c)
+    end
+end
+local function reapplyWorld()
+    ensureFx()
+    for _, f in pairs(worldReapply) do f() end
+end
 
 local World = Window:NewTab("World")
 
 World:NewSection("Lighting")
 regToggle(World, "Fullbright", "Fullbright", false, function(v) if v then hook.fullbright.start() else hook.fullbright.stop() end end)
-regToggle(World, "GlobalShadows", "Global shadows", Lighting.GlobalShadows, function(v) Lighting.GlobalShadows = v end)
-regSlider(World, "LightBrightness", "Brightness", "", { min = 0, max = 10, default = math.floor(Lighting.Brightness) }, function(v) Lighting.Brightness = v end)
-regSlider(World, "LightClockTime", "Time of day", "", { min = 0, max = 24, default = math.floor(math.clamp(Lighting.ClockTime, 0, 24)) }, function(v) Lighting.ClockTime = v end)
-regSlider(World, "LightExposure", "Exposure", "", { min = -5, max = 5, default = math.floor(Lighting.ExposureCompensation) }, function(v) Lighting.ExposureCompensation = v end)
-regColor(World, "LightAmbient", "Ambient", "Gray", function(c) Lighting.Ambient = c end)
-regColor(World, "LightOutdoor", "Outdoor ambient", "Gray", function(c) Lighting.OutdoorAmbient = c end)
+regToggle(World, "GlobalShadows", "Global shadows", Lighting.GlobalShadows, W(function(v) Lighting.GlobalShadows = v end))
+regSlider(World, "LightBrightness", "Brightness", "", { min = 0, max = 10, default = math.floor(Lighting.Brightness) }, W(function(v) Lighting.Brightness = v end))
+regSlider(World, "LightClockTime", "Time of day", "", { min = 0, max = 24, default = math.floor(math.clamp(Lighting.ClockTime, 0, 24)) }, W(function(v) Lighting.ClockTime = v end))
+regSlider(World, "LightExposure", "Exposure", "", { min = -5, max = 5, default = math.floor(Lighting.ExposureCompensation) }, W(function(v) Lighting.ExposureCompensation = v end))
+regColor(World, "LightAmbient", "Ambient", "Gray", Wc(function(c) Lighting.Ambient = c end))
+regColor(World, "LightOutdoor", "Outdoor ambient", "Gray", Wc(function(c) Lighting.OutdoorAmbient = c end))
 World:NewButton("Restore default lighting", function()
+    worldReapply = {}   -- stop re-asserting any overrides
     for k, v in pairs(LIGHT_DEFAULTS) do pcall(function() Lighting[k] = v end) end
     notify("Lighting restored", 2, "information")
 end)
 
 World:NewSection("Atmosphere")
-regSlider(World, "FogStart", "Fog start", "", { min = 0, max = 5000, default = math.floor(math.min(Lighting.FogStart, 5000)) }, function(v) Lighting.FogStart = v end)
-regSlider(World, "FogEnd", "Fog end", "", { min = 0, max = 50000, default = math.floor(math.min(Lighting.FogEnd, 50000)) }, function(v) Lighting.FogEnd = v end)
-regColor(World, "FogColor", "Fog color", "Gray", function(c) Lighting.FogColor = c end)
+regSlider(World, "FogStart", "Fog start", "", { min = 0, max = 5000, default = math.floor(math.min(Lighting.FogStart, 5000)) }, W(function(v) Lighting.FogStart = v end))
+regSlider(World, "FogEnd", "Fog end", "", { min = 0, max = 50000, default = math.floor(math.min(Lighting.FogEnd, 50000)) }, W(function(v) Lighting.FogEnd = v end))
+regColor(World, "FogColor", "Fog color", "Gray", Wc(function(c) Lighting.FogColor = c end))
 World:NewButton("Clear fog", function() Lighting.FogStart = 0; Lighting.FogEnd = 100000 end)
 
 World:NewSection("Post FX - Color correction")
-regToggle(World, "CCEnabled", "Enabled", false, function(v) CC.Enabled = v end)
-regDecimal(World, "CCBrightness", "Brightness", "%", -1, 1, 0, 100, function(v) CC.Brightness = v end)
-regDecimal(World, "CCContrast", "Contrast", "%", -1, 1, 0, 100, function(v) CC.Contrast = v end)
-regDecimal(World, "CCSaturation", "Saturation", "%", -1, 5, 0, 100, function(v) CC.Saturation = v end)
-regColor(World, "CCTint", "Tint", "White", function(c) CC.TintColor = c end)
+regToggle(World, "CCEnabled", "Enabled", false, W(function(v) CC.Enabled = v end))
+regDecimal(World, "CCBrightness", "Brightness", "%", -1, 1, 0, 100, W(function(v) CC.Brightness = v end))
+regDecimal(World, "CCContrast", "Contrast", "%", -1, 1, 0, 100, W(function(v) CC.Contrast = v end))
+regDecimal(World, "CCSaturation", "Saturation", "%", -1, 5, 0, 100, W(function(v) CC.Saturation = v end))
+regColor(World, "CCTint", "Tint", "White", Wc(function(c) CC.TintColor = c end))
 
 World:NewSection("Post FX - Bloom")
-regToggle(World, "BloomEnabled", "Enabled", false, function(v) Bloom.Enabled = v end)
-regDecimal(World, "BloomIntensity", "Intensity", "", 0, 5, 0.4, 10, function(v) Bloom.Intensity = v end)
-regSlider(World, "BloomThreshold", "Threshold", "", { min = 0, max = 10, default = 2 }, function(v) Bloom.Threshold = v end)
-regSlider(World, "BloomSize", "Size", "", { min = 0, max = 64, default = 24 }, function(v) Bloom.Size = v end)
+regToggle(World, "BloomEnabled", "Enabled", false, W(function(v) Bloom.Enabled = v end))
+regDecimal(World, "BloomIntensity", "Intensity", "", 0, 5, 0.4, 10, W(function(v) Bloom.Intensity = v end))
+regSlider(World, "BloomThreshold", "Threshold", "", { min = 0, max = 10, default = 2 }, W(function(v) Bloom.Threshold = v end))
+regSlider(World, "BloomSize", "Size", "", { min = 0, max = 64, default = 24 }, W(function(v) Bloom.Size = v end))
 
 World:NewSection("Post FX - Blur")
-regToggle(World, "BlurEnabled", "Enabled", false, function(v) Blur.Enabled = v end)
-regSlider(World, "BlurSize", "Size", "", { min = 0, max = 56, default = 12 }, function(v) Blur.Size = v end)
+regToggle(World, "BlurEnabled", "Enabled", false, W(function(v) Blur.Enabled = v end))
+regSlider(World, "BlurSize", "Size", "", { min = 0, max = 56, default = 12 }, W(function(v) Blur.Size = v end))
 
 World:NewSection("Post FX - Sun rays")
-regToggle(World, "SunRaysEnabled", "Enabled", false, function(v) SunRays.Enabled = v end)
-regDecimal(World, "SunRaysIntensity", "Intensity", "%", 0, 1, 0.25, 100, function(v) SunRays.Intensity = v end)
-regDecimal(World, "SunRaysSpread", "Spread", "%", 0, 1, 1, 100, function(v) SunRays.Spread = v end)
+regToggle(World, "SunRaysEnabled", "Enabled", false, W(function(v) SunRays.Enabled = v end))
+regDecimal(World, "SunRaysIntensity", "Intensity", "%", 0, 1, 0.25, 100, W(function(v) SunRays.Intensity = v end))
+regDecimal(World, "SunRaysSpread", "Spread", "%", 0, 1, 1, 100, W(function(v) SunRays.Spread = v end))
 
 World:NewSection("Camera")
 regToggle(World, "Freecam", "Freecam", false, function(v) if v then hook.freecam.start() else hook.freecam.stop() end end)
     :AddKeybind(Enum.KeyCode.L, "Freecam Toggle")
-regSlider(World, "Fov", "FOV", "", { min = 30, max = 120, default = math.floor(hook.fov.get() or 70) }, function(v) hook.fov.set(v) end)
+regSlider(World, "Fov", "FOV", "", { min = 30, max = 120, default = math.floor(hook.fov.get() or 70) }, W(function(v) hook.fov.set(v) end))
+
+-- re-assert World overrides on respawn, when our effects get wiped, and a slow
+-- backstop loop -- but only while something is actually overridden
+LocalPlr.CharacterAdded:Connect(function()
+    if next(worldReapply) then task.wait(0.4); reapplyWorld() end
+end)
+Lighting.ChildRemoved:Connect(function(c)
+    if c and c.Name and c.Name:match("^_wh_") and next(worldReapply) then task.defer(reapplyWorld) end
+end)
+task.spawn(function()
+    while not library.Unloaded do
+        task.wait(3)
+        if next(worldReapply) then reapplyWorld() end
+    end
+end)
 
 -- ============================================================
 --  MISC
