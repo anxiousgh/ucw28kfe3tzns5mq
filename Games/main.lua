@@ -228,7 +228,7 @@ regToggle(Movement, "ClickTp", "Click teleport", false, function(v) if v then ho
 -- Physical mode glues our character around them; "Desync position" spoofs our
 -- position to the orbit point while we stay put locally.
 Movement:NewSection("Fakepos orbit")
-Movement:NewLabel("Orbits the player selected in the Players tab.", "left")
+Movement:NewLabel("Orbits your selected player.", "left")
 regToggle(Movement, "FakeOrbit", "Fakepos orbit", false, function(v)
     if v then
         if not hook.fakeOrbit.getTarget() then
@@ -239,7 +239,7 @@ regToggle(Movement, "FakeOrbit", "Fakepos orbit", false, function(v)
         hook.fakeOrbit.stop()
     end
 end)
-regToggle(Movement, "FakeOrbitDesync", "Desync position (spoof instead of moving)", false,
+regToggle(Movement, "FakeOrbitDesync", "Desync position", false,
     function(v) hook.fakeOrbit.setDesync(v) end)
 regToggle(Movement, "FakeOrbitFace", "Always face target", true,
     function(v) hook.fakeOrbit.setFace(v) end)
@@ -391,7 +391,7 @@ fakeLagT:AddKeybind(Enum.KeyCode.Unknown, "Fake Lag Toggle")
 -- how big the lag is: ms each position update is delayed before it's re-sent
 regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, default = hook.fakeLag.getAmount() },
     function(v) hook.fakeLag.setAmount(v) end)
-Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
+Desync:NewLabel("Delays movement; higher = further back.", "left")
 
 -- ---- fakepos resolver ----
 -- Connection-glue method: Target key locks the player closest to your mouse,

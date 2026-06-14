@@ -1380,7 +1380,7 @@ function library:Init(key)
         pageLayout.Parent = page
         pageLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
         pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        pageLayout.Padding = UDim.new(0, 4)
+        pageLayout.Padding = UDim.new(0, 5)
 
         pagePadding.Name = "pagePadding"
         pagePadding.Parent = page
@@ -1436,11 +1436,12 @@ function library:Init(key)
             label.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             label.BackgroundTransparency = 1.000
             label.Position = UDim2.new(0.00499999989, 0, 0, 0)
-            label.Size = UDim2.new(0, 396, 0, 24)
+            label.Size = UDim2.new(0, 396, 0, 18)
             label.Font = Enum.Font.Code
             label.Text = text
-            label.TextColor3 = Color3.fromRGB(190, 190, 190)
-            label.TextSize = 14.000
+            -- hint text: smaller + dimmer so it sits quietly under its section
+            label.TextColor3 = Color3.fromRGB(140, 140, 140)
+            label.TextSize = 12.000
             label.TextWrapped = true
             label.TextXAlignment = Enum.TextXAlignment.Left
             label.RichText = true
@@ -1795,7 +1796,9 @@ function library:Init(key)
             sectionFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             sectionFrame.BackgroundTransparency = 1.000
             sectionFrame.ClipsDescendants = true
-            sectionFrame.Size = UDim2.new(0, 396, 0, 18)
+            -- taller frame + centered contents => more breathing room above/below
+            -- each section header, so groups read as further apart
+            sectionFrame.Size = UDim2.new(0, 396, 0, 30)
 
             sectionLayout.Name = "sectionLayout"
             sectionLayout.Parent = sectionFrame

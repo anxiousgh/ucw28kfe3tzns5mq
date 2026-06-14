@@ -3655,7 +3655,7 @@ regDropdown(AutoPlay, "BMSRespawnAction", "Action after respawn", "stay still", 
 AutoPlay:NewSection("Stats")
 regToggle(AutoPlay, "BMSStatsGui", "Show stats overlay", false, function(v) bms.autoPlay.setStatsGui(v) end)
 AutoPlay:NewButton("Reset stats", function() bms.autoPlay.resetStats() end)
-AutoPlay:NewLabel("Auto play reuses the Flag delay/range + Aim cone settings from the Autoflag tab.", "left")
+AutoPlay:NewLabel("Reuses the Autoflag tab settings.", "left")
 
 -- ---------------- AUTOFLAG ----------------
 local AutoFlag = Window:NewTab("Autoflag")

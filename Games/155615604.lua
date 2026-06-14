@@ -1003,7 +1003,7 @@ end):AddKeybind(Enum.KeyCode.F, "Killaura Toggle")
 regToggle(Aim, "PL_AuraInmates",   "Target inmates",   true, function(v) pl.killAura.setTargetTeam("inmate", v) end)
 regToggle(Aim, "PL_AuraGuards",    "Target guards",    true, function(v) pl.killAura.setTargetTeam("guard", v) end)
 regToggle(Aim, "PL_AuraCriminals", "Target criminals", true, function(v) pl.killAura.setTargetTeam("criminal", v) end)
-Aim:NewLabel("Auto-shoots the nearest visible enemy. Range/fire-rate are read from the equipped gun.", "left")
+Aim:NewLabel("Auto-shoots the nearest visible enemy.", "left")
 
 Aim:NewSection("Hit feedback")
 regToggle(Aim, "PL_HitMarker", "Hit marker", false, function(v) pl.hitMarker.setMarker(v) end)

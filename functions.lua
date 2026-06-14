@@ -854,8 +854,8 @@ local function flingPlayer(plr)
             pcall(function() h:SetNetworkOwner(lplr) end)
             pcall(function() th:SetNetworkOwner(lplr) end)
             pcall(function() if sethiddenproperty then sethiddenproperty(h,"PhysicsRepRootPart",th) end end)
-            -- directly behind them (+Z is their local back), facing them
-            local behind = (th.CFrame * CFrame.new(0,0,1.5)).Position
+            -- exactly 1 stud behind them (+Z is their local back), facing them
+            local behind = (th.CFrame * CFrame.new(0,0,1)).Position
             h.CFrame = CFrame.lookAt(behind, th.Position)
             -- hammer the velocity so the glued contact flings them
             h.AssemblyLinearVelocity=Vector3.new(1,1,1)*16384
@@ -912,7 +912,15 @@ local fakeOrbit = (function()
         if _bindActive then pcall(function() RunService:UnbindFromRenderStep(RESTORE) end); _bindActive=false end
         getgenv()._F_DESYNC_SENT_CF=nil
         local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
-        if h and _savedCF then pcall(function() h.CFrame=_savedCF end) end
+        if h then
+            -- un-glue: point our physics-rep root back at ourselves so the server
+            -- stops dragging us onto the target
+            pcall(function() if sethiddenproperty then sethiddenproperty(h,"PhysicsRepRootPart",h) end end)
+            pcall(function() h:SetNetworkOwner(lplr) end)
+            -- desync mode: drop back onto our real position. physical mode: leave
+            -- us where we are (don't teleport onto the player).
+            if _desync and _savedCF then pcall(function() h.CFrame=_savedCF end) end
+        end
         _savedCF=nil
     end
 

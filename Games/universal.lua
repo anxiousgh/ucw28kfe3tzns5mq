@@ -45,7 +45,7 @@ end, function() return cam.getLocked() ~= nil end)   -- keybind list lights up w
 -- how the lock picks who: nearest to crosshair / screen center / you
 regDropdown(Target, "LockPriority", "Lock priority", "Mouse",
     { "Mouse", "Camera", "Distance" }, false, function(v) cam.setLockMode(v) end)
-Target:NewLabel("Camlock + triggerbot only act on the locked target.", "left")
+Target:NewLabel("Acts only on the locked target.", "left")
 
 Target:NewSection("Visualization")
 regToggle(Target, "LockHighlight", "Highlight target", false, function(v) cam.setLockHighlight(v) end)
@@ -83,7 +83,7 @@ regDropdown(Aim, "CamMode", "Mode", cs.Mode or "Mouse",
     end)
 -- Clanning: in Mouse mode only, stand down while YOU are aiming (1st person,
 -- shiftlock, or right-click held) so the aimbot never fights your manual aim.
-clanningT = regToggle(Aim, "CamClanning", "Clanning (off in 1st person / shiftlock / RMB)",
+clanningT = regToggle(Aim, "CamClanning", "Clanning",
     cs.Clanning or false, function(v) cam.setClanning(v) end)
 if (cs.Mode or "Mouse") ~= "Mouse" then clanningT:Hide() end
 

@@ -3149,7 +3149,7 @@ regDecimal(Combat, "HC_ReloadCooldown", "Cooldown", "s", 0, 5, hc.autoReload.get
 local Checks = Window:NewTab("Checks")
 Checks:NewSection("Knock check")
 regToggle(Checks, "HC_KnockCheck", "Skip knocked players", false, function(v) knockCheckOn = v; rb.setSkipKnocked(v) end)
-regToggle(Checks, "HC_IgnoreKnocked", "Ignore knocked (switch to next target)", false, function(v) ignoreKnockedOn = v; rb.setIgnoreKnocked(v) end)
+regToggle(Checks, "HC_IgnoreKnocked", "Ignore knocked", false, function(v) ignoreKnockedOn = v; rb.setIgnoreKnocked(v) end)
 
 Checks:NewSection("Visible check")
 regToggle(Checks, "HC_StrictVis", "Strict (block see-through walls)", false, function(v) hook.utils.setStrictVisibleCheck(v) end)
