@@ -895,7 +895,27 @@ hook.games.hoodCustoms.autoStomp = (function()
     local radius, vertUp, vertDown = 5, 7, 1
     local interval = 0
     local rageTargets = false
-    local stompTarget, stompRestore = nil, nil   -- current targets-mode victim + desync restore
+    local stompTarget = nil   -- current targets-mode victim
+    local STOMP_Y = 3         -- studs above their HRP so our feet rest on their body
+
+    -- fakepos resolver (connection-glue): physically teleport directly on top of
+    -- the victim and replicate relative to them, so we're always standing on them.
+    local function glueAbove(hrp)
+        local lc = lplr.Character
+        local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+        if not lhrp or not hrp then return end
+        pcall(function() lhrp:SetNetworkOwner(lplr) end)
+        pcall(function() hrp:SetNetworkOwner(lplr) end)
+        pcall(function() if sethiddenproperty then sethiddenproperty(lhrp, "PhysicsRepRootPart", hrp) end end)
+        lhrp.CFrame = CFrame.new(hrp.Position + Vector3.new(0, STOMP_Y, 0))
+        lhrp.AssemblyLinearVelocity = Vector3.zero
+        lhrp.AssemblyAngularVelocity = Vector3.zero
+    end
+    local function unglue()
+        local lc = lplr.Character
+        local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+        if lhrp then pcall(function() if sethiddenproperty then sethiddenproperty(lhrp, "PhysicsRepRootPart", lhrp) end end) end
+    end
 
     local function someoneBelow()
         local lc = lplr.Character
@@ -921,7 +941,6 @@ hook.games.hoodCustoms.autoStomp = (function()
         if conn then conn:Disconnect() end
         conn = RunService.Heartbeat:Connect(function()
             if not G.hcAutoStompActive then return end
-            if interval > 0 and tick() - last < interval then return end
             local me = getMainEvent()
             if not me then return end
             if rageTargets then
@@ -929,26 +948,30 @@ hook.games.hoodCustoms.autoStomp = (function()
                 if stompTarget then
                     local stillKnocked = _hcIsKnocked(stompTarget) and not _targetDead(stompTarget)
                     if not (stompTarget.Parent and stompTarget.Character) or not stillKnocked then
-                        -- stomped (Dead) / gone / no longer knocked -> restore desync, drop
-                        if stompRestore then pcall(stompRestore); stompRestore = nil end
+                        -- stomped (Dead) / gone / no longer knocked -> un-glue, drop
+                        unglue()
                         stompTarget = nil
                     else
-                        -- still knocked, not yet Dead -> stay desynced ON them + stomp
+                        -- still knocked, not yet Dead -> stay glued ON TOP of them + stomp
                         local hrp = stompTarget.Character:FindFirstChild("HumanoidRootPart")
-                        if hrp then hook.desync.setCustomPos(hrp.Position.X, hrp.Position.Y, hrp.Position.Z) end
-                        last = tick()
-                        pcall(function() me:FireServer("Stomp") end)
+                        if hrp then
+                            glueAbove(hrp)   -- every frame so we stay on them
+                            if not (interval > 0 and tick() - last < interval) then
+                                last = tick()
+                                pcall(function() me:FireServer("Stomp") end)
+                            end
+                        end
                         return
                     end
                 end
-                -- pick a new knocked, not-yet-Dead target and desync onto it
+                -- pick a new knocked, not-yet-Dead target and glue on top of it
                 local list = hook.ragebot.getTargetList and hook.ragebot.getTargetList() or {}
                 for _, plr in ipairs(list) do
                     if _hcIsKnocked(plr) and not _targetDead(plr) then
                         local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
                         if hrp then
-                            stompTarget  = plr
-                            stompRestore = _desyncToRestore(hrp.Position)
+                            stompTarget = plr
+                            glueAbove(hrp)
                             last = tick()
                             pcall(function() me:FireServer("Stomp") end)
                             return
@@ -957,6 +980,7 @@ hook.games.hoodCustoms.autoStomp = (function()
                 end
                 return  -- targets-only: never fall through to stomp non-targets
             end
+            if interval > 0 and tick() - last < interval then return end
             if not someoneBelow() then return end
             last = tick()
             pcall(function() me:FireServer("Stomp") end)
@@ -966,8 +990,8 @@ hook.games.hoodCustoms.autoStomp = (function()
     local function stop()
         G.hcAutoStompActive = false
         if conn then conn:Disconnect(); conn = nil end
-        -- if we were desynced onto a victim, restore the previous desync state
-        if stompRestore then pcall(stompRestore); stompRestore = nil end
+        -- un-glue so the server stops pinning us onto the last victim
+        unglue()
         stompTarget = nil
     end
 
