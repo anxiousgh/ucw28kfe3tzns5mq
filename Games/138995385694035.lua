@@ -497,6 +497,7 @@ hook.ragebot = {
     setOrbitSpeed    = function(n) RageSettings.OrbitSpeed    = math.clamp(tonumber(n) or 60, 1, 9999) end,
     setOrbitHeight   = function(n) RageSettings.OrbitHeight   = math.clamp(tonumber(n) or 5, -50, 50) end,
     setAutoShoot     = function(b) RageSettings.AutoShoot = b == true end,
+    getAutoShoot     = function() return RageSettings.AutoShoot == true end,
     setAutoShootDist     = function(n) RageSettings.AutoShootDist = math.clamp(tonumber(n) or 50, 1, 500) end,
     setAutoShootCooldown = function(n) RageSettings.AutoShootCooldown = math.clamp(tonumber(n) or 100, 0, 10000) end,
     setAutoShootRequireTool = function(b) RageSettings.AutoShootRequireTool = b == true end,
@@ -2320,6 +2321,7 @@ hook.games.hoodCustoms.knifeBot = (function()
     local orbitAngle     = 0      -- internal accumulator
     local attachHbConn, attachClickThread
     local attachActive   = false
+    local preFH, preAS   = false, false   -- forcehit / ragebot-autoshoot state before we muted them
 
     local function getTargetHRP()
         if not rbGetTarget then return nil end
@@ -2350,6 +2352,10 @@ hook.games.hoodCustoms.knifeBot = (function()
         attachActive = true
         G.hcKnifeAttachActive = true
         orbitAngle = 0
+        -- remember what we're about to mute so attachStop can put it back
+        preFH = (hook.games and hook.games.hoodCustoms and hook.games.hoodCustoms.forceHit
+                 and hook.games.hoodCustoms.forceHit.isActive and hook.games.hoodCustoms.forceHit.isActive()) or false
+        preAS = (hook.ragebot and hook.ragebot.getAutoShoot and hook.ragebot.getAutoShoot()) or false
         muteRangedAutos()
 
         if attachHbConn then attachHbConn:Disconnect() end
@@ -2425,6 +2431,15 @@ hook.games.hoodCustoms.knifeBot = (function()
         G.hcKnifeAttachActive = false
         if attachHbConn then attachHbConn:Disconnect(); attachHbConn = nil end
         if attachClickThread then pcall(task.cancel, attachClickThread); attachClickThread = nil end
+        -- restore the ranged autos we muted, so forcehit works again without a
+        -- manual off/on of its toggle
+        if preFH and hook.games and hook.games.hoodCustoms and hook.games.hoodCustoms.forceHit then
+            pcall(hook.games.hoodCustoms.forceHit.start)
+        end
+        if preAS and hook.ragebot and hook.ragebot.setAutoShoot then
+            pcall(hook.ragebot.setAutoShoot, true)
+        end
+        preFH, preAS = false, false
     end
 
     -- -------- auto-equip --------
@@ -3054,7 +3069,7 @@ regDecimal(Combat, "HC_FHSoundVol", "Hit sound volume", "", 0, 3, 1, 10, functio
 -- range, visible (head LOS) and not knocked. Only people you've targeted.
 Combat:NewSection("Auto Shoot")
 local autoOn, autoRange, autoCooldown = false, 200, 0.15
-regToggle(Combat, "HC_AutoShoot", "Auto shoot (targets only)", false, function(v) autoOn = v end)
+local autoShootT = regToggle(Combat, "HC_AutoShoot", "Auto shoot (targets only)", false, function(v) autoOn = v end)
 regSlider(Combat, "HC_AutoShootRange", "Range", "", { min = 10, max = 1000, default = 200 }, function(v) autoRange = v end)
 regDecimal(Combat, "HC_AutoShootCooldown", "Cooldown", "s", 0.05, 1, 0.15, 100, function(v) autoCooldown = v end)
 task.spawn(function()
@@ -3076,7 +3091,13 @@ Combat:NewSection("Voidshoot")
 local voidShootOn = false
 regToggle(Combat, "HC_VoidShoot", "Voidshoot", false, function(v)
     voidShootOn = v
-    if v then hook.desync.startVoid() else hook.desync.stop() end
+    if v then
+        -- voidshoot drives its own shots; kill autoshoot so they don't fight
+        if autoShootT then autoShootT:Set(false) end
+        hook.desync.startVoid()
+    else
+        hook.desync.stop()
+    end
 end)
 local function doVoidShoot()
     if not voidShootOn then return end
