@@ -2391,6 +2391,12 @@ hook.games.hoodCustoms.knifeBot = (function()
             -- guard against a degenerate look CFrame (pos == target / NaN), which
             -- can also hard-freeze the client
             if pos == pos and (pos - tPos).Magnitude >= 0.5 then
+                -- connection-glue method: grab network ownership of both roots and
+                -- re-parent our physics-rep root onto the target so we replicate
+                -- right on them. Works alongside voidspam (which desyncs the pose).
+                pcall(function() hrp:SetNetworkOwner(lplr) end)
+                pcall(function() tHrp:SetNetworkOwner(lplr) end)
+                pcall(function() if sethiddenproperty then sethiddenproperty(hrp, "PhysicsRepRootPart", tHrp) end end)
                 pcall(function()
                     hrp.CFrame = CFrame.new(pos, tPos)
                 end)
