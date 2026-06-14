@@ -3808,31 +3808,21 @@ F.desync = (function()
     }
 end)()
 
---  GLUE ORBIT: drive the server position with a Weld to an anchored part
---  instead of CFrame writes. The HRP is welded to an invisible anchored part;
---  each Heartbeat the anchor moves to the orbit point (the welded HRP follows ->
---  replicates there), each RenderStep it moves back to your start spot (you see
---  yourself put). Because the HRP is welded to an anchored part, your local
---  movement is LOCKED while this runs - it's a "stand still, server-hitbox
---  orbits the target" tool. Reuses the desync orbit's target/radius/speed/height.
+--  GLUE ORBIT (connection-glue): an AlignPosition constraint sticks the HRP to a
+--  point that circles the target. The physics solver resolves it every step, so
+--  you track the (moving) target's centre continuously and ride a smooth circle
+--  around them - no TP chase, no forced spin. You physically orbit them. Reuses
+--  the desync orbit's target/radius/speed/height (+ "track through desync").
 F.glueOrbit = (function()
     local active = false
-    local anchor, weld, hb, startCF, angle, glueHum
-    local RESTORE = "_F_GLUEORBIT_RESTORE"
+    local att, ap, hb, angle, glueHum
 
     local function teardown()
         active = false
         if hb then hb:Disconnect(); hb = nil end
-        pcall(function() RunService:UnbindFromRenderStep(RESTORE) end)
-        if weld then pcall(function() weld:Destroy() end); weld = nil end
-        if anchor then pcall(function() anchor:Destroy() end); anchor = nil end
-        -- let the humanoid drive the character again
+        if ap  then pcall(function() ap:Destroy() end);  ap  = nil end
+        if att then pcall(function() att:Destroy() end); att = nil end
         if glueHum then pcall(function() glueHum.PlatformStand = false end); glueHum = nil end
-        local c = lplr.Character
-        local hrp = c and c:FindFirstChild("HumanoidRootPart")
-        if hrp and startCF then pcall(function() hrp.CFrame = startCF end) end
-        startCF = nil
-        getgenv()._F_DESYNC_SENT_CF = nil
     end
 
     local function start()
@@ -3842,22 +3832,18 @@ F.glueOrbit = (function()
         if not hrp then return end
         active = true
         angle = 0
-        startCF = hrp.CFrame
-        -- PlatformStand: stop the Humanoid driving the character so the weld to
-        -- the anchored part can actually move it (without this the humanoid wins
-        -- and you don't move at all -> "doesn't orbit").
+        -- PlatformStand so the humanoid stops fighting the constraint
         glueHum = c:FindFirstChildOfClass("Humanoid")
         if glueHum then pcall(function() glueHum.PlatformStand = true end) end
-        anchor = Instance.new("Part")
-        anchor.Name = "Glue"; anchor.Anchored = true; anchor.CanCollide = false
-        anchor.CanQuery = false; anchor.CastShadow = false; anchor.Transparency = 1
-        anchor.Size = Vector3.new(1, 1, 1); anchor.CFrame = startCF
-        anchor.Parent = workspace
-        weld = Instance.new("Weld")
-        weld.Part0 = anchor; weld.Part1 = hrp; weld.C0 = CFrame.new(); weld.Parent = anchor
+        att = Instance.new("Attachment"); att.Parent = hrp
+        ap = Instance.new("AlignPosition")
+        ap.Mode = Enum.PositionAlignmentMode.OneAttachment
+        ap.Attachment0 = att; ap.ApplyAtCenterOfMass = true
+        ap.MaxForce = math.huge; ap.MaxVelocity = math.huge; ap.Responsiveness = 200
+        ap.Parent = hrp
 
         hb = RunService.Heartbeat:Connect(function()
-            if not active or not anchor then return end
+            if not active or not ap.Parent then return end
             local name = F.desync.getOrbitTarget and F.desync.getOrbitTarget()
             local tgt  = name and game:GetService("Players"):FindFirstChild(name)
             local thrp = tgt and tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
@@ -3867,17 +3853,10 @@ F.glueOrbit = (function()
             local hgt = (F.desync.getOrbitHeight and F.desync.getOrbitHeight()) or 0
             angle = (angle + sp) % 360
             local a = math.rad(angle)
-            local off = Vector3.new(math.cos(a) * r, hgt, math.sin(a) * r)
-            -- target position (honours "track through desync")
+            -- centre = target's live position (honours "track through desync"),
+            -- offset circles around it; the constraint pulls us onto that point
             local tpos = (F.desync.getOrbitTargetPos and F.desync.getOrbitTargetPos(thrp)) or thrp.Position
-            -- anchor (and the welded HRP) -> orbit point; this is what replicates
-            anchor.CFrame = CFrame.new(tpos + off) * (startCF - startCF.Position)
-            getgenv()._F_DESYNC_SENT_CF = anchor.CFrame
-        end)
-        RunService:BindToRenderStep(RESTORE, Enum.RenderPriority.First.Value, function()
-            if not active or not anchor then return end
-            -- pull the anchor (+ welded HRP) back to our real spot for the camera
-            if startCF then anchor.CFrame = startCF end
+            ap.Position = tpos + Vector3.new(math.cos(a) * r, hgt, math.sin(a) * r)
         end)
     end
 

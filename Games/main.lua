@@ -373,12 +373,12 @@ Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the pa
 -- with e.g. Velocity. (Not compatible with the Raknet mode - that blocks the
 -- physics packet the orbit needs to send.)
 Desync:NewSection("Orbit")
--- orbit uses the custom-mode desync (CFrame writes): the server position
--- circles the target while you keep moving locally. (Raknet can't drive a
--- MOVING orbit - it only blocks/freezes packets - so the orbit always uses
--- this method; glue is no longer used.)
+-- orbit uses the connection-glue method: an AlignPosition constraint sticks you
+-- to a point circling the target, resolved by physics every step - smooth, no
+-- TP chase, no forced spin. You physically orbit them (uses the same
+-- target/radius/speed/height + "track through desync").
 regToggle(Desync, "OrbitEnabled", "Enable orbit", false,
-    function(v) hook.desync.setOrbitEnabled(v) end)
+    function(v) if v then hook.glueOrbit.start() else hook.glueOrbit.stop() end end)
 Desync:NewButton("Lock orbit to selected player", function()
     if setOrbitFromSelection then setOrbitFromSelection() end
 end)
