@@ -388,6 +388,52 @@ regDecimal(Desync, "OrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,
 regSlider(Desync, "OrbitHeight", "Orbit height", "", { min = -100, max = 100, default = 0 },
     function(v) hook.desync.setOrbitHeight(v) end)
 
+-- Debug/verify: drop a bright marker at our best estimate of the orbit
+-- target's REAL position (same clustering the orbit uses), so you can SEE
+-- whether it's locking onto where they actually are vs the desync spoof.
+do
+    local RunSvc2  = game:GetService("RunService")
+    local PlayersS = game:GetService("Players")
+    local marker, buf, last, on = nil, {}, nil, false
+    local function est(hrp)
+        local raw = hrp.Position
+        buf[#buf + 1] = raw
+        while #buf > 30 do table.remove(buf, 1) end
+        if #buf < 6 then last = raw; return raw end
+        for i = #buf, 1, -1 do
+            local c = 0
+            for j = 1, #buf do if (buf[j] - buf[i]).Magnitude <= 15 then c = c + 1 end end
+            if c >= 4 then last = buf[i]; return buf[i] end
+        end
+        return last or raw
+    end
+    local function ensureMarker()
+        if marker and marker.Parent then return marker end
+        marker = Instance.new("Part")
+        marker.Name = "_wh_realpos"; marker.Anchored = true; marker.CanCollide = false
+        marker.CanQuery = false; marker.CastShadow = false; marker.Size = Vector3.new(2, 5, 1)
+        marker.Material = Enum.Material.Neon; marker.Color = Color3.fromRGB(255, 40, 40)
+        marker.Transparency = 0.3; marker.Parent = workspace
+        return marker
+    end
+    local function removeMarker()
+        if marker then pcall(function() marker:Destroy() end); marker = nil end
+        buf = {}; last = nil
+    end
+    regToggle(Desync, "OrbitRealMarker", "Show real-pos marker (debug)", false, function(v)
+        on = v; if not v then removeMarker() end
+    end)
+    RunSvc2.RenderStepped:Connect(function()
+        if not on or library.Unloaded then if library.Unloaded then removeMarker() end return end
+        local name = hook.desync.getOrbitTarget and hook.desync.getOrbitTarget()
+        local p    = name and PlayersS:FindFirstChild(name)
+        local ch   = p and p.Character
+        local hrp  = ch and ch:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        ensureMarker().CFrame = CFrame.new(est(hrp))
+    end)
+end
+
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
 -- ============================================================
