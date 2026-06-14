@@ -2996,6 +2996,32 @@ task.spawn(function()
     end
 end)
 
+-- Voidshoot: stay void-desynced; the keybind pops you OUT of the void (so your
+-- real position re-syncs and the shot's origin is valid), force-hits the target,
+-- then pops you back INTO the void after a short resync window.
+Combat:NewSection("Voidshoot")
+local voidShootOn = false
+regToggle(Combat, "HC_VoidShoot", "Voidshoot", false, function(v)
+    voidShootOn = v
+    if v then hook.desync.startVoid() else hook.desync.stop() end
+end)
+local function doVoidShoot()
+    if not voidShootOn then return end
+    hook.desync.stop()                  -- pop out of the void (sync real position)
+    local tgt = activeTargetAlive()
+    if tgt and canEngage(tgt) then
+        local wasFH = hc.forceHit.isActive()
+        if not wasFH then hc.forceHit.start() end
+        hc.forceHit.setTarget(tgt)
+        pcall(hc.forceHit.fire)
+        if not wasFH then hc.forceHit.stop() end
+    end
+    task.delay(0.05, function()
+        if voidShootOn then hook.desync.startVoid() end  -- pop back into the void
+    end)
+end
+Combat:NewKeybind("Voidshoot key", Enum.KeyCode.V, doVoidShoot)
+
 -- Camlock: lock the camera onto the active target-system target
 Combat:NewSection("Camlock")
 local camlockOn, camlockSmooth = false, 0.5
