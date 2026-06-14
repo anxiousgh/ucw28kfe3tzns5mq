@@ -19,11 +19,12 @@ local lplr       = Players.LocalPlayer
 
 -- ============================================================
 --  NO FALL DAMAGE
---  Freezes a "grounded health" baseline; while airborne it stops
---  updating, so the instant we land any health the fall/landing
---  took is restored (with a short grace window for damage the
---  game applies a frame or two after landing). Re-hooks every
---  respawn so it survives death.
+--  Core mechanic (per the reference): disable the Humanoid's Dead
+--  state so a fall (or anything) can't kill us. Re-applied every
+--  frame because the game re-enables it on respawn, and we also
+--  restore any health a fall/landing takes (short grace window for
+--  damage the game applies a frame or two after touchdown) so it's
+--  truly "no fall damage", not just "no death". Re-hooks on respawn.
 -- ============================================================
 local noFall = false
 do
@@ -40,10 +41,13 @@ do
         landGraceUntil = 0
         if conn then conn:Disconnect() end
         conn = RunService.Heartbeat:Connect(function()
-            if not hum or hum.Parent == nil or hum.Health <= 0 then return end
+            if not hum or hum.Parent == nil then return end
+            -- death immunity: disabled while ON, restored while OFF. Re-applied
+            -- every frame so it sticks even if the game flips it back.
+            pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, not noFall) end)
             -- while disabled, keep the baseline tracking current health
             if not noFall then
-                groundedHealth = hum.Health
+                if hum.Health > 0 then groundedHealth = hum.Health end
                 wasAirborne = false
                 return
             end
@@ -59,11 +63,11 @@ do
                 end
                 if tick() < landGraceUntil then
                     -- just landed: undo the fall/landing damage
-                    if groundedHealth and hum.Health < groundedHealth then
+                    if groundedHealth and groundedHealth > 0 and hum.Health < groundedHealth then
                         hum.Health = groundedHealth
                     end
                 else
-                    groundedHealth = hum.Health   -- grounded: accept normal changes
+                    if hum.Health > 0 then groundedHealth = hum.Health end   -- accept normal changes
                 end
             end
         end)
