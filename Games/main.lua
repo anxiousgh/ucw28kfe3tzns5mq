@@ -248,30 +248,6 @@ end)
 regToggle(Movement, "IceSlide", "Ice slide", false, function(v) if v then hook.ice.start() else hook.ice.stop() end end)
 regSlider(Movement, "IceFriction", "Slide friction", "%", { min = 50, max = 99, default = 98 }, function(v) hook.ice.setSlide(v / 100) end)
 
--- ---- fakepos resolver orbit ----
--- Circle the player picked in the Players tab, grabbing network ownership of them
--- each frame (fakepos resolver) so they resolve to their real spot. Mode toggle:
--- desync (server pos circles, you stay) or physical (your character circles them).
-local pickOrbitTarget  -- assigned after the Players-tab selection helper exists
-Movement:NewSection("Fakepos resolver orbit")
-regToggle(Movement, "FakeOrbitDesync", "Orbit via desync (off = physical move)", false,
-    function(v) hook.fakeposOrbit.setMode(v and "desync" or "physical") end)
-regToggle(Movement, "FakeOrbitEnabled", "Fakepos resolver orbit", false,
-    function(v)
-        if v then
-            if pickOrbitTarget then pickOrbitTarget() end   -- target = Players-tab pick
-            hook.fakeposOrbit.start()
-        else
-            hook.fakeposOrbit.stop()
-        end
-    end)
-regSlider(Movement, "FakeOrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
-    function(v) hook.fakeposOrbit.setRadius(v) end)
-regDecimal(Movement, "FakeOrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,
-    function(v) hook.fakeposOrbit.setSpeed(v) end)
-regSlider(Movement, "FakeOrbitHeight", "Orbit height", "", { min = -100, max = 100, default = 0 },
-    function(v) hook.fakeposOrbit.setHeight(v) end)
-
 -- ============================================================
 --  DESYNC  (own tab)
 -- ============================================================
@@ -390,13 +366,7 @@ regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, 
     function(v) hook.fakeLag.setAmount(v) end)
 Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
 
--- ---- fakepos resolver ----
--- When on, Goto (Players tab + HC tab) grabs network ownership of the target so
--- their desync can't spoof their position - they resolve to their real spot. No
--- glue, and your character doesn't move.
-Desync:NewSection("Fakepos resolver")
-regToggle(Desync, "FakeposResolver", "Fakepos resolver", false,
-    function(v) hook.players.setFakeposResolver(v) end)
+
 
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
@@ -437,14 +407,7 @@ local function playerNameList()
     return names
 end
 local plrSel = nil
-local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v)
-    plrSel = v
-    -- if the fakepos orbit is running, re-target it to the newly picked player
-    if hook.fakeposOrbit and hook.fakeposOrbit.isActive and hook.fakeposOrbit.isActive() then
-        local p = labelToPlayer[v]
-        if p then hook.fakeposOrbit.setTarget(p.Name) end
-    end
-end)
+local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v) plrSel = v end)
 
 -- rebuild the option list but keep the current pick selected if they're still
 -- here (SetOptions clears the selection, which was un-choosing players on every
@@ -478,13 +441,6 @@ local function selectedPlayer()
     return p
 end
 
--- wired into the Movement-tab "Fakepos resolver orbit" (declared earlier) so it
--- targets whoever is picked in the Players tab
-pickOrbitTarget = function()
-    local p = selectedPlayer()
-    if p then hook.fakeposOrbit.setTarget(p.Name) end
-end
-
 PlayersTab:NewButton("Follow", function() local p = selectedPlayer(); if p then hook.players.follow(p) end end)
     :AddButton("Unfollow", function() hook.players.followStop() end)
 PlayersTab:NewButton("View", function() local p = selectedPlayer(); if p then hook.players.view(p) end end)
@@ -498,11 +454,6 @@ PlayersTab:NewButton("Fling", function() local p = selectedPlayer(); if p then h
             notify("No emote playing on " .. (p and p.Name or "?"), 2, "alert")
         end
     end)
--- Fling normally uses the connection-glue (PhysicsRepRootPart) to stick onto the
--- target. Desync mode instead spoofs your SERVER position onto them + spins, so
--- your character never physically moves there.
-regToggle(PlayersTab, "FlingDesyncMode", "Fling: desync mode (no real move)", false,
-    function(v) hook.players.setFlingDesync(v) end)
 
 -- ============================================================
 --  VISUALS
