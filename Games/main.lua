@@ -1225,6 +1225,13 @@ Misc:NewSection("Respawn")
 -- resets your character but respawns at where you triggered it (decay F.respawn)
 Misc:NewButton("Respawn", function() hook.respawn.fire() end)
 Misc:NewKeybind("Respawn key", Enum.KeyCode.T, function() hook.respawn.fire() end)
+-- rejoin the same server (falls back to a fresh server if the instance is full/gone)
+Misc:NewButton("Rejoin", function()
+    local TS  = game:GetService("TeleportService")
+    local plr = game:GetService("Players").LocalPlayer
+    local ok = pcall(function() TS:TeleportToPlaceInstance(game.PlaceId, game.JobId, plr) end)
+    if not ok then pcall(function() TS:Teleport(game.PlaceId, plr) end) end
+end)
 
 Misc:NewSection("Emotes")
 -- ON: emotes keep playing while you move. OFF: they stop when you move (vanilla)

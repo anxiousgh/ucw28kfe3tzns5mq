@@ -3768,7 +3768,7 @@ end)()
 --  orbits the target" tool. Reuses the desync orbit's target/radius/speed/height.
 F.glueOrbit = (function()
     local active = false
-    local anchor, weld, hb, startCF, angle
+    local anchor, weld, hb, startCF, angle, glueHum
     local RESTORE = "_F_GLUEORBIT_RESTORE"
 
     local function teardown()
@@ -3777,6 +3777,8 @@ F.glueOrbit = (function()
         pcall(function() RunService:UnbindFromRenderStep(RESTORE) end)
         if weld then pcall(function() weld:Destroy() end); weld = nil end
         if anchor then pcall(function() anchor:Destroy() end); anchor = nil end
+        -- let the humanoid drive the character again
+        if glueHum then pcall(function() glueHum.PlatformStand = false end); glueHum = nil end
         local c = lplr.Character
         local hrp = c and c:FindFirstChild("HumanoidRootPart")
         if hrp and startCF then pcall(function() hrp.CFrame = startCF end) end
@@ -3792,6 +3794,11 @@ F.glueOrbit = (function()
         active = true
         angle = 0
         startCF = hrp.CFrame
+        -- PlatformStand: stop the Humanoid driving the character so the weld to
+        -- the anchored part can actually move it (without this the humanoid wins
+        -- and you don't move at all -> "doesn't orbit").
+        glueHum = c:FindFirstChildOfClass("Humanoid")
+        if glueHum then pcall(function() glueHum.PlatformStand = true end) end
         anchor = Instance.new("Part")
         anchor.Name = "Glue"; anchor.Anchored = true; anchor.CanCollide = false
         anchor.CanQuery = false; anchor.CastShadow = false; anchor.Transparency = 1
