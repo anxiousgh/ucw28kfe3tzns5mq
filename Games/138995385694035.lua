@@ -3110,7 +3110,7 @@ local function doVoidShoot()
         pcall(hc.forceHit.fire)
         if not wasFH then hc.forceHit.stop() end
     end
-    task.delay(0.05, function()
+    task.delay(0.12, function()
         if voidShootOn then hook.desync.startVoid() end  -- pop back into the void
     end)
 end
