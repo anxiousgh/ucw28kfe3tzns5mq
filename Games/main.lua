@@ -373,12 +373,13 @@ Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the pa
 -- with e.g. Velocity. (Not compatible with the Raknet mode - that blocks the
 -- physics packet the orbit needs to send.)
 Desync:NewSection("Orbit")
--- orbit uses the connection-glue method: an AlignPosition constraint sticks you
--- to a point circling the target, resolved by physics every step - smooth, no
--- TP chase, no forced spin. You physically orbit them (uses the same
--- target/radius/speed/height + "track through desync").
+-- orbit uses the CFrame desync (places you exactly each frame - stable, tight).
+-- The glue/AlignPosition version overshot and flung you off, and force-based
+-- following lags worse. The residual "chase" on a MOVING target is network
+-- latency (you orbit their replicated, delayed position) - inherent to every
+-- method. Same target/radius/speed/height + "track through desync".
 regToggle(Desync, "OrbitEnabled", "Enable orbit", false,
-    function(v) if v then hook.glueOrbit.start() else hook.glueOrbit.stop() end end)
+    function(v) hook.desync.setOrbitEnabled(v) end)
 Desync:NewButton("Lock orbit to selected player", function()
     if setOrbitFromSelection then setOrbitFromSelection() end
 end)
