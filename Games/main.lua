@@ -249,33 +249,22 @@ regToggle(Movement, "IceSlide", "Ice slide", false, function(v) if v then hook.i
 regSlider(Movement, "IceFriction", "Slide friction", "%", { min = 50, max = 99, default = 98 }, function(v) hook.ice.setSlide(v / 100) end)
 
 -- ---- fakepos resolver orbit ----
--- Circle a target, grabbing network ownership of them each frame (fakepos
--- resolver) so they resolve to their real spot. Lock the target with the keybind
--- (closest to your mouse). Mode toggle: desync (server pos circles, you stay) or
--- physical (your character circles them).
+-- Circle the player picked in the Players tab, grabbing network ownership of them
+-- each frame (fakepos resolver) so they resolve to their real spot. Mode toggle:
+-- desync (server pos circles, you stay) or physical (your character circles them).
+local pickOrbitTarget  -- assigned after the Players-tab selection helper exists
 Movement:NewSection("Fakepos resolver orbit")
 regToggle(Movement, "FakeOrbitDesync", "Orbit via desync (off = physical move)", false,
     function(v) hook.fakeposOrbit.setMode(v and "desync" or "physical") end)
 regToggle(Movement, "FakeOrbitEnabled", "Fakepos resolver orbit", false,
-    function(v) if v then hook.fakeposOrbit.start() else hook.fakeposOrbit.stop() end end)
-Movement:NewKeybind("Lock orbit target", Enum.KeyCode.Q, function()
-    local camera = workspace.CurrentCamera
-    local mp = game:GetService("UserInputService"):GetMouseLocation()
-    local me = game:GetService("Players").LocalPlayer
-    local best, bestD
-    for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
-        local hrp = p ~= me and p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local sp, on = camera:WorldToViewportPoint(hrp.Position)
-            if on then
-                local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
-                if not bestD or d < bestD then best, bestD = p, d end
-            end
+    function(v)
+        if v then
+            if pickOrbitTarget then pickOrbitTarget() end   -- target = Players-tab pick
+            hook.fakeposOrbit.start()
+        else
+            hook.fakeposOrbit.stop()
         end
-    end
-    if best then hook.fakeposOrbit.setTarget(best.Name); notify("Orbit target: " .. best.Name, 2, "success")
-    else notify("No target near cursor", 2, "alert") end
-end)
+    end)
 regSlider(Movement, "FakeOrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
     function(v) hook.fakeposOrbit.setRadius(v) end)
 regDecimal(Movement, "FakeOrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,
@@ -448,7 +437,14 @@ local function playerNameList()
     return names
 end
 local plrSel = nil
-local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v) plrSel = v end)
+local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v)
+    plrSel = v
+    -- if the fakepos orbit is running, re-target it to the newly picked player
+    if hook.fakeposOrbit and hook.fakeposOrbit.isActive and hook.fakeposOrbit.isActive() then
+        local p = labelToPlayer[v]
+        if p then hook.fakeposOrbit.setTarget(p.Name) end
+    end
+end)
 
 -- rebuild the option list but keep the current pick selected if they're still
 -- here (SetOptions clears the selection, which was un-choosing players on every
@@ -480,6 +476,13 @@ local function selectedPlayer()
     end
     if not p then notify("Player not found: " .. tostring(plrSel), 2, "error") end
     return p
+end
+
+-- wired into the Movement-tab "Fakepos resolver orbit" (declared earlier) so it
+-- targets whoever is picked in the Players tab
+pickOrbitTarget = function()
+    local p = selectedPlayer()
+    if p then hook.fakeposOrbit.setTarget(p.Name) end
 end
 
 PlayersTab:NewButton("Follow", function() local p = selectedPlayer(); if p then hook.players.follow(p) end end)
