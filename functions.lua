@@ -3152,16 +3152,19 @@ F.desync = (function()
     local SHARED = getgenv()._F_DESYNC_STATE
 
     local active   = false
-    local mode     = "off"   -- "void"|"voidspam"|"sky"|"spin"|"velocity"|"raknet"|"invisible"|"freeze"|"custom"|"orbit"|"off"
+    local mode     = "off"   -- "void"|"voidspam"|"sky"|"spin"|"velocity"|"raknet"|"invisible"|"freeze"|"custom"|"off" (orbit is a separate overlay, not a mode)
     local _invisBase  -- cluster center for invisible mode (picked once per session)
     local _freezeCF   -- captured HRP CFrame at the moment freeze mode is enabled
     local _customPos = Vector3.new(0, 0, 0)  -- user-chosen server position (custom mode)
-    -- orbit mode: server position circles a target player while you move locally
-    local _orbitName   = nil   -- target player's Name (resolved live each frame)
-    local _orbitRadius = 8
-    local _orbitSpeed  = 4      -- degrees per heartbeat
-    local _orbitHeight = 0
-    local _orbitAngle  = 0
+    -- orbit OVERLAY: independent of `mode`, so it can run alongside another
+    -- desync (e.g. Velocity). Server position circles a target player while you
+    -- move locally.
+    local _orbitEnabled = false
+    local _orbitName    = nil   -- target player's Name (resolved live each frame)
+    local _orbitRadius  = 8
+    local _orbitSpeed   = 4      -- degrees per heartbeat
+    local _orbitHeight  = 0
+    local _orbitAngle   = 0
     local realCF, realLV, realAV
     local syncEnd  = 0
     local hbConn
@@ -3225,20 +3228,24 @@ F.desync = (function()
             -- server sees us at the user-chosen X/Y/Z (keep our real rotation)
             local rot = hrp.CFrame - hrp.CFrame.Position
             hrp.CFrame = CFrame.new(_customPos) * rot
-        elseif mode == "orbit" then
-            -- server position circles a target player. If the target is gone
-            -- this frame, leave the real CFrame (no spoof) so we never snap to 0,0,0
-            local tgt  = _orbitName and game:GetService("Players"):FindFirstChild(_orbitName)
-            local tc   = tgt and tgt.Character
-            local thrp = tc and tc:FindFirstChild("HumanoidRootPart")
-            if thrp then
-                _orbitAngle = (_orbitAngle + _orbitSpeed) % 360
-                local a   = math.rad(_orbitAngle)
-                local off = Vector3.new(math.cos(a) * _orbitRadius, _orbitHeight, math.sin(a) * _orbitRadius)
-                local rot = hrp.CFrame - hrp.CFrame.Position
-                hrp.CFrame = CFrame.new(thrp.Position + off) * rot
-            end
         end
+    end
+
+    -- Orbit OVERLAY: a separate, independent spoof applied AFTER applySpoof in
+    -- the same Heartbeat (so it never fights the mode over the HRP). Circles the
+    -- target player's position. Compatible with modes that don't touch the
+    -- CFrame (e.g. Velocity); with a CFrame mode it just wins, last write.
+    local function applyOrbit(hrp)
+        if not _orbitEnabled then return end
+        local tgt  = _orbitName and game:GetService("Players"):FindFirstChild(_orbitName)
+        local tc   = tgt and tgt.Character
+        local thrp = tc and tc:FindFirstChild("HumanoidRootPart")
+        if not thrp then return end   -- target gone this frame -> leave CFrame as-is
+        _orbitAngle = (_orbitAngle + _orbitSpeed) % 360
+        local a   = math.rad(_orbitAngle)
+        local off = Vector3.new(math.cos(a) * _orbitRadius, _orbitHeight, math.sin(a) * _orbitRadius)
+        local rot = hrp.CFrame - hrp.CFrame.Position
+        hrp.CFrame = CFrame.new(thrp.Position + off) * rot
     end
 
     local function bind()
@@ -3257,11 +3264,13 @@ F.desync = (function()
             if mode == "voidspam" then
                 local ge = getgenv()._F_DESYNC_SYNC_END or 0
                 if tick() < ge then
+                    pcall(function() applyOrbit(hrp) end)   -- orbit still applies in the sync window
                     getgenv()._F_DESYNC_SENT_CF = hrp.CFrame  -- sync window: real pos replicates
                     return
                 end
             end
             pcall(function() applySpoof(hrp) end)
+            pcall(function() applyOrbit(hrp) end)   -- overlay, after the primary mode
             -- the spoofed CFrame is exactly what replicates to the server (read by
             -- the server-pos visualizer). raknet sets this at engage time instead,
             -- since it blocks via the send hook with no Heartbeat loop.
@@ -3491,8 +3500,10 @@ F.desync = (function()
         bind()
     end
 
+    -- stops the PRIMARY desync (mode). The orbit overlay is independent: if it's
+    -- still enabled, the Heartbeat pipeline stays up (orbit-only) instead of
+    -- tearing all the way down.
     local function stopAll()
-        active = false
         SHARED.active = false
         SHARED.mode   = "off"
         getgenv()._F_DESYNC_RAKNET_WANTED = false
@@ -3508,6 +3519,19 @@ F.desync = (function()
             end
         end)
         getgenv()._F_DESYNC_RAKNET_INSTALLED = false
+        _freezeCF = nil   -- next freeze enable recaptures the spot
+        getgenv()._F_DESYNC_FROZEN = nil
+        mode = "off"
+
+        if _orbitEnabled then
+            -- keep the pipeline running for the orbit overlay (non-raknet HB)
+            active = true
+            if not hbConn then bind() end
+            return
+        end
+
+        -- full teardown: no primary, no orbit
+        active = false
         if hbConn then hbConn:Disconnect(); hbConn = nil end
         pcall(function() RunService:UnbindFromRenderStep(RESTORE_BIND) end)
         local c = lplr.Character
@@ -3520,10 +3544,25 @@ F.desync = (function()
             end)
         end
         realCF, realLV, realAV = nil, nil, nil
-        _freezeCF = nil   -- next freeze enable recaptures the spot
         getgenv()._F_DESYNC_SENT_CF = nil
-        getgenv()._F_DESYNC_FROZEN  = nil
-        mode = "off"
+    end
+
+    -- orbit overlay on/off, independent of the primary mode
+    local function setOrbitEnabled(b)
+        b = b and true or false
+        if b == _orbitEnabled then return end
+        _orbitEnabled = b
+        _orbitAngle = 0
+        if b then
+            -- spin up the pipeline if nothing else is hosting it (orbit-only).
+            -- (raknet has no Heartbeat + blocks 0x1B, so orbit can't ride it.)
+            if not active and mode ~= "raknet" then
+                active = true
+                if not hbConn then bind() end
+            end
+        elseif mode == "off" then
+            stopAll()   -- nothing left running -> tear the pipeline down
+        end
     end
 
     --  Sync window visualizer
@@ -3604,8 +3643,10 @@ F.desync = (function()
             _customPos = Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
         end,
         getCustomPos    = function() return _customPos end,
-        -- orbit: server position circles a target player while you move locally
-        startOrbit      = function() startMode("orbit") end,
+        -- orbit OVERLAY: independent of mode; circles a target player. Can run
+        -- alongside a non-CFrame desync (Velocity) or on its own.
+        setOrbitEnabled = setOrbitEnabled,
+        isOrbitEnabled  = function() return _orbitEnabled end,
         setOrbitTarget  = function(name) _orbitName = name and tostring(name) or nil; _orbitAngle = 0 end,
         getOrbitTarget  = function() return _orbitName end,
         setOrbitRadius  = function(n) _orbitRadius = math.clamp(tonumber(n) or 8, 0, 1000) end,

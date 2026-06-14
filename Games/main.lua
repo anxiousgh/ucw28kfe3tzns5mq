@@ -271,9 +271,8 @@ local MODE_START = {
     end,
     Freeze   = function() hook.desync.startFreeze() return true end,
     Custom   = function() hook.desync.startCustom() return true end,
-    Orbit    = function() hook.desync.startOrbit()  return true end,
 }
-regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet", "Freeze", "Custom", "Orbit" }, false, function(v)
+regDropdown(Desync, "DesyncMode", "Desync mode", "Void", { "Void", "Sky", "Spin", "Velocity", "Raknet", "Freeze", "Custom" }, false, function(v)
     desyncMode = v
     if updateDesyncSliders then updateDesyncSliders(v) end
     if desyncOn then
@@ -314,18 +313,6 @@ local txX = customBox("Custom X", "X position", function(n) customX = n end)
 local txY = customBox("Custom Y", "Y position", function(n) customY = n end)
 local txZ = customBox("Custom Z", "Z position", function(n) customZ = n end)
 
--- Orbit mode: server position circles the Players-tab selected player while you
--- keep moving locally. Pick a player in the Players tab, then lock it here.
-local orbitBtn = Desync:NewButton("Lock orbit to selected player", function()
-    if setOrbitFromSelection then setOrbitFromSelection() end
-end)
-local sOrbR = regSlider(Desync, "DesyncOrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
-    function(v) hook.desync.setOrbitRadius(v) end)
-local sOrbS = regDecimal(Desync, "DesyncOrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,
-    function(v) hook.desync.setOrbitSpeed(v) end)
-local sOrbH = regSlider(Desync, "DesyncOrbitHeight", "Orbit height", "", { min = -100, max = 100, default = 0 },
-    function(v) hook.desync.setOrbitHeight(v) end)
-
 -- only the controls the chosen desync mode actually uses are shown
 local DESYNC_SLIDERS = {
     Void     = { sMin, sMax },
@@ -335,10 +322,9 @@ local DESYNC_SLIDERS = {
     Raknet   = {},
     Freeze   = {},
     Custom   = { txX, txY, txZ },
-    Orbit    = { orbitBtn, sOrbR, sOrbS, sOrbH },
 }
 updateDesyncSliders = function(modeName)
-    for _, s in ipairs({ sMin, sMax, sSpin, sVel, sSky, txX, txY, txZ, orbitBtn, sOrbR, sOrbS, sOrbH }) do
+    for _, s in ipairs({ sMin, sMax, sSpin, sVel, sSky, txX, txY, txZ }) do
         if s and s.Hide then s:Hide() end
     end
     for _, s in ipairs(DESYNC_SLIDERS[modeName] or {}) do
@@ -380,6 +366,23 @@ fakeLagT:AddKeybind(Enum.KeyCode.Unknown, "Fake Lag Toggle")
 regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, default = hook.fakeLag.getAmount() },
     function(v) hook.fakeLag.setAmount(v) end)
 Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
+
+-- ---- orbit (its own section: an overlay, runs alongside a desync mode) ----
+-- Server position circles the Players-tab selected player while you move
+-- locally. Independent of the desync mode above, so you can run it together
+-- with e.g. Velocity. (Not compatible with the Raknet mode - that blocks the
+-- physics packet the orbit needs to send.)
+Desync:NewSection("Orbit")
+regToggle(Desync, "OrbitEnabled", "Enable orbit", false, function(v) hook.desync.setOrbitEnabled(v) end)
+Desync:NewButton("Lock orbit to selected player", function()
+    if setOrbitFromSelection then setOrbitFromSelection() end
+end)
+regSlider(Desync, "OrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
+    function(v) hook.desync.setOrbitRadius(v) end)
+regDecimal(Desync, "OrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,
+    function(v) hook.desync.setOrbitSpeed(v) end)
+regSlider(Desync, "OrbitHeight", "Orbit height", "", { min = -100, max = 100, default = 0 },
+    function(v) hook.desync.setOrbitHeight(v) end)
 
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
