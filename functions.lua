@@ -857,8 +857,8 @@ local function flingPlayer(plr)
             -- directly behind them (+Z is their local back), facing them
             local behind = (th.CFrame * CFrame.new(0,0,1.5)).Position
             h.CFrame = CFrame.lookAt(behind, th.Position)
-            h.AssemblyLinearVelocity=Vector3.zero
-            h.AssemblyAngularVelocity=Vector3.zero
+            -- hammer the velocity so the glued contact flings them
+            h.AssemblyLinearVelocity=Vector3.new(1,1,1)*16384
         end)
         -- hold the glue for the duration, bailing if either character despawns
         local deadline=tick()+2.5
