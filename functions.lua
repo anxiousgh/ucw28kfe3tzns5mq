@@ -783,17 +783,21 @@ end
 -- you). Extrapolate forward by their velocity * that delay so you land on where
 -- they ACTUALLY are right now, instead of chasing where they were.
 local _Stats = game:GetService("Stats")
-local _predictMult = 1.0   -- multiplier on the measured ping (user-tunable)
+-- auto lead time = the current round-trip ping (seconds), read live every call.
+-- no manual knob: the ping is measured and the velocity is taken from the
+-- target's actual movement, so the prediction adapts on its own.
 local function _predictSeconds()
     local ok, ping = pcall(function() return _Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
-    local s = (ok and tonumber(ping) or 100) / 1000
-    return s * _predictMult
+    return (ok and tonumber(ping) or 100) / 1000
 end
--- returns the target HRP's CFrame shifted forward by the predicted travel
-local function _predictCF(ehrp)
+-- target HRP CFrame shifted forward by velocity * lead so it lands where they
+-- actually are now. `vel` overrides the read velocity (the fling passes a
+-- position-delta velocity, steadier than AssemblyLinearVelocity for a
+-- non-owned part).
+local function _predictCF(ehrp, vel)
     local lead = _predictSeconds()
     if lead <= 0 then return ehrp.CFrame end
-    return ehrp.CFrame + ehrp.AssemblyLinearVelocity * lead
+    return ehrp.CFrame + (vel or ehrp.AssemblyLinearVelocity) * lead
 end
 
 local function gotoPlayer(plr)
@@ -853,14 +857,23 @@ local function flingPlayer(plr)
             end
         end)
         local deadline=tick()+2.5
+        local _pPos,_pT
         while tick()<deadline do
             local echar=target.Character; if not echar then break end
             local ehrp=echar:FindFirstChild("HumanoidRootPart"); if not ehrp then break end
             if not lplr.Character then break end
             local lh=lplr.Character:FindFirstChild("HumanoidRootPart"); if not lh then break end
-            -- predict where they actually are now (not the lagged read) so the
-            -- fling lands on them while they're moving instead of chasing
-            lh.CFrame=_predictCF(ehrp)*CFrame.new(0,0,0.5); task.wait(0.016)
+            -- velocity from the replicated position delta (steadier than the
+            -- physics velocity for a non-owned part)
+            local now=tick(); local pos=ehrp.Position; local vel=ehrp.AssemblyLinearVelocity
+            if _pPos and _pT and now>_pT then
+                local dv=(pos-_pPos)/(now-_pT)
+                if dv.Magnitude>0.1 then vel=dv end
+            end
+            _pPos,_pT=pos,now
+            -- predict where they actually are now so the fling lands on a moving
+            -- target instead of chasing the lagged read
+            lh.CFrame=_predictCF(ehrp,vel)*CFrame.new(0,0,0.5); task.wait(0.016)
         end
         if _hbConn then _hbConn:Disconnect() end
         if _rsConn then _rsConn:Disconnect() end
@@ -2816,9 +2829,6 @@ F.players = {
     isFollowing = function() return _follow.target end,
     setFollowVisualize = followSetVisualize,
     getFollowVisualize = function() return _follow.viz end,
-    -- prediction multiplier on the measured ping (0 = read raw lagged position)
-    setPredict = function(n) _predictMult = math.clamp(tonumber(n) or 1, 0, 5) end,
-    getPredict = function() return _predictMult end,
 }
 
 --  AUTO-TARGETER
