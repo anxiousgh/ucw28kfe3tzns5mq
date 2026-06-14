@@ -1403,13 +1403,13 @@ hook.games.hoodCustoms.forceHit = (function()
     local _lastTracerAt   = 0
     local MIN_TRACER_GAP  = 0.05
 
-    -- bypass the server's wall/range raycast: the server validates a shot by
-    -- raycasting origin -> hit (line of sight + within range). With this on we
-    -- send the origin a few studs from the TARGET (toward us) instead of our
-    -- HRP, so that validation ray is short, wall-free and in range - letting
-    -- out-of-range / through-wall hits register instead of erroring "wallbang".
+    -- bypass v2: DON'T move the origin (field 3) - that's what tripped "origin
+    -- mismatch". The payload has TWO position fields: origin (checked against
+    -- our real HRP) and aim (field 4). Keep origin real and move only AIM onto
+    -- the target, betting HC's range/LoS raycast keys off aim while the mismatch
+    -- check keys off origin. Normal stays the position (the reference does that
+    -- and the server accepts it) and the damage path is untouched.
     local bypassRaycast = false
-    local BYPASS_OFFSET = 3   -- studs from the hit back toward the shooter
 
     local lastFire = 0
 
@@ -1770,16 +1770,16 @@ hook.games.hoodCustoms.forceHit = (function()
             hits[i]    = { Normal = hitPos, Instance = part, Position = hitPos }
             targets[i] = { thePart = part, theOffset = Vector3.zero }
         end
-        -- origin the server validates against. Normally our HRP; with bypass on,
-        -- a point BYPASS_OFFSET studs from the target toward us so the server's
-        -- origin->hit raycast is short, wall-free and in range.
+        -- origin (field 3) stays our real HRP so the mismatch check passes.
+        -- bypass moves only AIM (field 4) to a point 3 studs off the target so a
+        -- range/LoS raycast that keys off aim is short, wall-free and in range.
         local origin = root.Position
+        local aim    = origin
         if bypassRaycast then
             local toMe = root.Position - hitPos
-            local mag  = toMe.Magnitude
-            origin = (mag > 0.1) and (hitPos + toMe.Unit * BYPASS_OFFSET) or hitPos
+            aim = (toMe.Magnitude > 0.1) and (hitPos + toMe.Unit * 3) or hitPos
         end
-        local payload = { hits, targets, origin, origin, workspace:GetServerTimeNow() }
+        local payload = { hits, targets, origin, aim, workspace:GetServerTimeNow() }
         return pcall(function() me:FireServer("Shoot", payload) end)
     end
     -- Legacy single-shot wrapper kept for non-shotgun call sites
