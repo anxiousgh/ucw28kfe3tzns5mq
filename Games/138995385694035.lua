@@ -1403,6 +1403,14 @@ hook.games.hoodCustoms.forceHit = (function()
     local _lastTracerAt   = 0
     local MIN_TRACER_GAP  = 0.05
 
+    -- bypass the server's wall/range raycast: the server validates a shot by
+    -- raycasting origin -> hit (line of sight + within range). With this on we
+    -- send the origin a few studs from the TARGET (toward us) instead of our
+    -- HRP, so that validation ray is short, wall-free and in range - letting
+    -- out-of-range / through-wall hits register instead of erroring "wallbang".
+    local bypassRaycast = false
+    local BYPASS_OFFSET = 3   -- studs from the hit back toward the shooter
+
     local lastFire = 0
 
     local _RS = game:GetService("ReplicatedStorage")
@@ -1762,7 +1770,16 @@ hook.games.hoodCustoms.forceHit = (function()
             hits[i]    = { Normal = hitPos, Instance = part, Position = hitPos }
             targets[i] = { thePart = part, theOffset = Vector3.zero }
         end
-        local payload = { hits, targets, root.Position, root.Position, workspace:GetServerTimeNow() }
+        -- origin the server validates against. Normally our HRP; with bypass on,
+        -- a point BYPASS_OFFSET studs from the target toward us so the server's
+        -- origin->hit raycast is short, wall-free and in range.
+        local origin = root.Position
+        if bypassRaycast then
+            local toMe = root.Position - hitPos
+            local mag  = toMe.Magnitude
+            origin = (mag > 0.1) and (hitPos + toMe.Unit * BYPASS_OFFSET) or hitPos
+        end
+        local payload = { hits, targets, origin, origin, workspace:GetServerTimeNow() }
         return pcall(function() me:FireServer("Shoot", payload) end)
     end
     -- Legacy single-shot wrapper kept for non-shotgun call sites
@@ -2203,6 +2220,8 @@ hook.games.hoodCustoms.forceHit = (function()
     t.setHitPart    = function(name) hitPartName = name or "Head" end
     t.getHitPart    = function() return hitPartName end
     t.setCooldown   = function(n) cooldown = math.max(0, tonumber(n) or 0.2) end
+    t.setBypassRaycast = function(v) bypassRaycast = v == true end
+    t.getBypassRaycast = function() return bypassRaycast end
     -- setShotgunMode / getShotgunMode removed - there's only one path now
     -- (synth, the canonical-payload direct FireServer). Kept as no-op
     -- stubs so the loader doesn't crash if it still tries to call them.
@@ -2954,6 +2973,9 @@ regToggle(Combat, "HC_ForceHit", "Force Hit (needs Auto Shoot)", false, function
 end)
 regDropdown(Combat, "HC_ForceHitPart", "Hit part", "Head", { "Head", "UpperTorso", "HumanoidRootPart" }, false, function(v) hc.forceHit.setHitPart(v) end)
 regSlider(Combat, "HC_ForceHitCooldown", "Cooldown", " ms", { min = 0, max = 1000, default = 200 }, function(v) hc.forceHit.setCooldown(v / 1000) end)
+-- sends the shot origin next to the target so the server's wall/range raycast
+-- passes (fixes the "wallbang" error on out-of-range / through-wall hits)
+regToggle(Combat, "HC_FHBypassRaycast", "Bypass raycast (wallbang / any range)", false, function(v) hc.forceHit.setBypassRaycast(v) end)
 
 Combat:NewSection("Fake tracer")
 regToggle(Combat, "HC_FHTracer", "Show fake bullet tracer", true, function(v) hc.forceHit.setTracerEnabled(v) end)
@@ -2980,19 +3002,15 @@ regDecimal(Combat, "HC_FHSoundVol", "Hit sound volume", "", 0, 3, 1, 10, functio
 -- Auto Shoot: force-hits LOCKED targets (from the Target tab) that are in
 -- range, visible (head LOS) and not knocked. Only people you've targeted.
 Combat:NewSection("Auto Shoot")
-local autoOn, autoRange, autoCooldown, autoRequireVis = false, 200, 0.15, true
+local autoOn, autoRange, autoCooldown = false, 200, 0.15
 regToggle(Combat, "HC_AutoShoot", "Auto shoot (targets only)", false, function(v) autoOn = v end)
 regSlider(Combat, "HC_AutoShootRange", "Range", "", { min = 10, max = 1000, default = 200 }, function(v) autoRange = v end)
 regDecimal(Combat, "HC_AutoShootCooldown", "Cooldown", "s", 0.05, 1, 0.15, 100, function(v) autoCooldown = v end)
--- off = drop the line-of-sight requirement entirely (shoot targets through
--- walls). Pair with "Bypass raycast" so the server accepts the through-wall hit.
-regToggle(Combat, "HC_AutoShootVis", "Require line of sight", true, function(v) autoRequireVis = v end)
 task.spawn(function()
     while not library.Unloaded do
         if autoOn then
-            -- highest-priority locked target in range, skipping knocked; LOS
-            -- required only when autoRequireVis is on
-            local p = bestTarget(knockCheckOn or ignoreKnockedOn, autoRequireVis, autoRange)
+            -- highest-priority locked target in range + visible, skipping knocked
+            local p = bestTarget(knockCheckOn or ignoreKnockedOn, true, autoRange)
             -- only shoot loaded players who aren't spawn-protected (ForceField)
             if p and canEngage(p) then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
         end
