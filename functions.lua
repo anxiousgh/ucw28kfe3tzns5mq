@@ -854,8 +854,8 @@ local function flingPlayer(plr)
             pcall(function() h:SetNetworkOwner(lplr) end)
             pcall(function() th:SetNetworkOwner(lplr) end)
             pcall(function() if sethiddenproperty then sethiddenproperty(h,"PhysicsRepRootPart",th) end end)
-            -- 3 studs behind them (+Z is their local back), facing them
-            local behind = (th.CFrame * CFrame.new(0,0,3)).Position
+            -- directly behind them (+Z is their local back), facing them
+            local behind = (th.CFrame * CFrame.new(0,0,1.5)).Position
             h.CFrame = CFrame.lookAt(behind, th.Position)
             h.AssemblyLinearVelocity=Vector3.zero
             h.AssemblyAngularVelocity=Vector3.zero
@@ -926,18 +926,16 @@ local fakeOrbit = (function()
             if not thrp or not hrp then return end
             _angle=(_angle + _speed*dt) % 360
             local cf=orbitCF(thrp, hrp)
-            if _desync then
-                _savedCF = hrp.CFrame          -- where we actually are (held locally)
-                hrp.CFrame = cf                -- spoofed pose replicates to the server
-                getgenv()._F_DESYNC_SENT_CF = cf
-            else
-                pcall(function() hrp:SetNetworkOwner(lplr) end)
-                pcall(function() thrp:SetNetworkOwner(lplr) end)
-                pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
-                hrp.CFrame = cf
-                hrp.AssemblyLinearVelocity=Vector3.zero
-                hrp.AssemblyAngularVelocity=Vector3.zero
-            end
+            if _desync then _savedCF = hrp.CFrame end   -- remember where we really are
+            -- always the connection-glue method; desync mode just restores our
+            -- local view each render frame so we don't physically move
+            pcall(function() hrp:SetNetworkOwner(lplr) end)
+            pcall(function() thrp:SetNetworkOwner(lplr) end)
+            pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
+            hrp.CFrame = cf
+            hrp.AssemblyLinearVelocity=Vector3.zero
+            hrp.AssemblyAngularVelocity=Vector3.zero
+            if _desync then getgenv()._F_DESYNC_SENT_CF = cf end
         end)
         -- desync mode only: restore our local view each render frame so we don't
         -- actually move on our own screen
