@@ -761,7 +761,7 @@ hook.games.prisonLife = (function()
     -- ---- team-based enemy filter ----
     -- Criminal -> Guards (always) + hostile Inmates (conditional)
     -- Inmate   -> Criminals, Guards
-    -- Guard    -> Criminals (always) + hostile Inmates (conditional)
+    -- Guard    -> ONLY inmates with Hostile == true (no criminals)
     -- Same-team is never targeted. Team names normalized to a
     -- category so singular/plural ("Criminal"/"Criminals") match.
     -- Returns true if a Prisoner/Inmate player has any of the
@@ -814,9 +814,12 @@ hook.games.prisonLife = (function()
         elseif myCat == "inmate" then
             return theirCat == "criminal" or theirCat == "guard"
         elseif myCat == "guard" then
-            -- criminals always; hostile inmates conditionally
-            if theirCat == "criminal" then return true end
-            if theirCat == "inmate" then return _isHostileInmate(player) end
+            -- as a guard: ONLY inmates whose Hostile attribute is true (per
+            -- request) - no criminals, and not trespassing/armed-but-not-hostile
+            if theirCat == "inmate" then
+                local ch = player.Character
+                return ch ~= nil and ch:GetAttribute("Hostile") == true
+            end
             return false
         end
 
