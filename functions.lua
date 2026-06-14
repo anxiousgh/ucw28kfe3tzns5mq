@@ -477,32 +477,45 @@ local function cmdRe()
 end
 
 --  NOCLIP / FULLBRIGHT / FREECAM / ZOOM
+-- some games keep a separate collision proxy outside the character (e.g. NDS's
+-- workspace.hahahhaahahhaahhaa.CollisionPart) that still blocks us even with the
+-- body set non-collidable. Disable any we find too. Setting CanCollide on a
+-- server-owned workspace part is local-only, so this doesn't affect other players.
+local _EXTRA_COLLIDERS = { "CollisionPart" }
+local function _forEachExtraCollider(fn)
+    for _, container in ipairs(workspace:GetChildren()) do
+        for _, name in ipairs(_EXTRA_COLLIDERS) do
+            local p = container:FindFirstChild(name)
+            if p and p:IsA("BasePart") then pcall(fn, p) end
+        end
+    end
+end
+
 local function stopNoclip()
     G.noclipActive=false
     pcall(function() RunService:UnbindFromRenderStep("NoclipStep") end)
     if G.noclipHBConn then G.noclipHBConn:Disconnect(); G.noclipHBConn=nil end
     if G.noclipConn and type(G.noclipConn)~="boolean" then G.noclipConn:Disconnect() end
     G.noclipConn=nil
-    -- restore CanCollide on the parts we were overriding. The engine
+    -- restore CanCollide on the character body + any extra colliders we disabled
     local c = lplr.Character
     if c then
-        for _, name in ipairs({"HumanoidRootPart","UpperTorso","Torso","Head","LowerTorso"}) do
-            local p = c:FindFirstChild(name)
-            if p and p:IsA("BasePart") then
-                pcall(function() p.CanCollide = true end)
-            end
+        for _, p in ipairs(c:GetChildren()) do
+            if p:IsA("BasePart") then pcall(function() p.CanCollide = true end) end
         end
     end
+    _forEachExtraCollider(function(p) p.CanCollide = true end)
 end
 local function startNoclip()
     G.noclipActive=true
-    -- only the 5 collision-relevant parts need CanCollide=false; iterating
     RunService:BindToRenderStep("NoclipStep", Enum.RenderPriority.First.Value, function()
         if not G.noclipActive then return end
         local c=lplr.Character; if not c then return end
-        for _,name in ipairs({"HumanoidRootPart","UpperTorso","Torso","Head","LowerTorso"}) do
-            local p=c:FindFirstChild(name); if p then p.CanCollide=false end
+        -- every BasePart in the character (covers R6 limbs, R15, custom rigs)
+        for _,p in ipairs(c:GetChildren()) do
+            if p:IsA("BasePart") then p.CanCollide=false end
         end
+        _forEachExtraCollider(function(p) p.CanCollide=false end)
     end)
 end
 
