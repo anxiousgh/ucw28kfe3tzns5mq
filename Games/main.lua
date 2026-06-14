@@ -557,30 +557,6 @@ PlayersTab:NewButton("Fling", function() local p = selectedPlayer(); if p then h
             notify("No emote playing on " .. (p and p.Name or "?"), 2, "alert")
         end
     end)
--- debug: green marker at the PREDICTED real position of the selected player
--- (where goto/fling aim). Compare it to where they actually are - it should sit
--- ahead of their server position, on them, while they move.
-do
-    local RunSvc2 = game:GetService("RunService")
-    local marker, on = nil, false
-    local function ensure()
-        if marker and marker.Parent then return marker end
-        marker = Instance.new("Part")
-        marker.Name = "_wh_predict"; marker.Anchored = true; marker.CanCollide = false
-        marker.CanQuery = false; marker.CastShadow = false; marker.Size = Vector3.new(2, 5, 1)
-        marker.Material = Enum.Material.Neon; marker.Color = Color3.fromRGB(80, 255, 120)
-        marker.Transparency = 0.3; marker.Parent = workspace
-        return marker
-    end
-    local function rm() if marker then pcall(function() marker:Destroy() end); marker = nil end end
-    regToggle(PlayersTab, "ShowPredictMarker", "Show prediction marker", false, function(v) on = v; if not v then rm() end end)
-    RunSvc2.RenderStepped:Connect(function()
-        if not on or library.Unloaded then if library.Unloaded then rm() end return end
-        local p   = labelToPlayer[plrSel]
-        local pos = p and hook.players.predictPos and hook.players.predictPos(p)
-        if pos then ensure().CFrame = CFrame.new(pos) else rm() end
-    end)
-end
 
 -- ============================================================
 --  VISUALS

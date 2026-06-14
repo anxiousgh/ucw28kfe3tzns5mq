@@ -844,40 +844,28 @@ local function flingPlayer(plr)
     local lhrp=char:FindFirstChild("HumanoidRootPart"); if not lhrp then return end
     local savedCF=lhrp.CFrame
     task.spawn(function()
-        local _types={}; local _spoofing=false; local _angle=0
+        local _angle=0; local _savedVel
         local _hbConn,_rsConn
         _hbConn=RunService.Heartbeat:Connect(function()
-            local c=lplr.Character; if not c then return end
-            local h=c:FindFirstChild("HumanoidRootPart"); if not h then return end
-            _types[1]=h.CFrame; _types[2]=h.AssemblyLinearVelocity; _spoofing=true; _angle=(_angle+45)%360
-            h.CFrame=h.CFrame*CFrame.Angles(math.rad(_angle),math.rad(_angle*2),math.rad(_angle*0.5))
+            local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
+            local tc=target.Character; local th=tc and tc:FindFirstChild("HumanoidRootPart")
+            if not h or not th then return end
+            _savedVel=h.AssemblyLinearVelocity; _angle=(_angle+120)%360
+            -- snap onto the target's LIVE position + spin hard; THIS replicates
+            h.CFrame=th.CFrame*CFrame.new(0,0,0.5)*CFrame.Angles(math.rad(_angle),math.rad(_angle*2),math.rad(_angle*0.5))
             h.AssemblyLinearVelocity=Vector3.new(1,1,1)*16384
         end)
         _rsConn=RunService.RenderStepped:Connect(function()
-            if _spoofing and _types[1] then
-                local c=lplr.Character; if not c then return end
-                local h=c:FindFirstChild("HumanoidRootPart"); if not h then return end
-                h.CFrame=_types[1]; h.AssemblyLinearVelocity=_types[2]; _spoofing=false
-            end
+            -- keep our LOCAL view put (we don't actually move; the server flings them)
+            local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
+            if h then h.CFrame=savedCF; if _savedVel then h.AssemblyLinearVelocity=_savedVel end end
         end)
+        -- the Heartbeat connection does the work (snap+spin on the target);
+        -- just hold for the duration, bailing if either character despawns
         local deadline=tick()+2.5
-        local _pPos,_pT
         while tick()<deadline do
-            local echar=target.Character; if not echar then break end
-            local ehrp=echar:FindFirstChild("HumanoidRootPart"); if not ehrp then break end
-            if not lplr.Character then break end
-            local lh=lplr.Character:FindFirstChild("HumanoidRootPart"); if not lh then break end
-            -- velocity from the replicated position delta (steadier than the
-            -- physics velocity for a non-owned part)
-            local now=tick(); local pos=ehrp.Position; local vel=ehrp.AssemblyLinearVelocity
-            if _pPos and _pT and now>_pT then
-                local dv=(pos-_pPos)/(now-_pT)
-                if dv.Magnitude>0.1 then vel=dv end
-            end
-            _pPos,_pT=pos,now
-            -- predict where they actually are now so the fling lands on a moving
-            -- target instead of chasing the lagged read
-            lh.CFrame=_predictCF(ehrp,vel)*CFrame.new(0,0,0.5); task.wait(0.016)
+            if not target.Character or not lplr.Character then break end
+            task.wait()
         end
         if _hbConn then _hbConn:Disconnect() end
         if _rsConn then _rsConn:Disconnect() end
