@@ -458,6 +458,9 @@ do
         if s.target then s.target = nil; notify("Target cleared", 2, "information")
         else s.target = closest(); if s.target then notify("Target: " .. s.target.Name, 2, "success") else notify("No target near cursor", 2, "alert") end end
     end)
+    -- expose the locked target so game modules (e.g. MM2 shoot) can aim at the
+    -- same part the resolver tps onto
+    getgenv()._F_FAKEPOS_GET = function() return s.target end
     regToggle(Desync, "FakeposResolver", "Fakepos resolver", false, function(v) s.attached = v end)
     regToggle(Desync, "FakeposTracer", "Tracer", true, function(v) s.tracer.enabled = v end)
     regDropdown(Desync, "FakeposTracerMode", "Tracer origin", "Mouse", { "Mouse", "Bottom", "HRP" }, false, function(v) s.tracer.mode = v end)

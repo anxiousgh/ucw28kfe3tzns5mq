@@ -533,6 +533,53 @@ hook.games.mm2 = (function()
         invisible = "startInvisible",
     }
 
+    -- Fire the Gun's Shoot remote at a target CFrame. Handles the
+    -- desync snapshot/restart so our real HRP is the shooter position at
+    -- fire time (server-side validation rejects the hit otherwise).
+    local function fireShootAt(theirCF)
+        if not theirCF then return false, "no_victim_hrp" end
+        local remote = findHitRemote()
+        if not remote then return false, "no_gun" end
+
+        -- snapshot + stop any active desync so our HRP is at the real
+        -- position before the shot.
+        local restartName
+        if hook.desync and hook.desync.getMode then
+            local m = hook.desync.getMode()
+            if m and m ~= "off" and SHOOT_DESYNC_RESTARTERS[m] then
+                restartName = SHOOT_DESYNC_RESTARTERS[m]
+                hook.desync.stop()
+            end
+        end
+
+        -- Read myPos AFTER the desync stopped (HRP back at real position)
+        -- so arg2 matches what the server has for us.
+        local myPos = myPosCFrame()
+        if not myPos then
+            if restartName and hook.desync and hook.desync[restartName] then
+                pcall(function() hook.desync[restartName]() end)
+            end
+            return false, "no_my_hrp"
+        end
+
+        -- Canonical payload: arg1 = target part CFrame, arg2 = shooter HRP
+        -- position with identity rotation.
+        local ok, err = pcall(function() remote:FireServer(theirCF, myPos) end)
+        if not ok then
+            print("[decay.lua] Shoot FireServer error:", err)
+        end
+
+        -- restart desync after a brief grace period so the shot registers
+        if restartName then
+            task.delay(0.2, function()
+                if hook.desync and hook.desync[restartName] then
+                    pcall(function() hook.desync[restartName]() end)
+                end
+            end)
+        end
+        return true
+    end
+
     local function shootMurdererFire()
         local victim
         for _, plr in ipairs(Players:GetPlayers()) do
@@ -543,53 +590,19 @@ hook.games.mm2 = (function()
             end
         end
         if not victim then return false, "no_murderer" end
-        local theirCF = targetHitCF(victim.Character)
-        if not theirCF then return false, "no_victim_hrp" end
+        return fireShootAt(targetHitCF(victim.Character))
+    end
 
-        local remote = findHitRemote()
-        if not remote then return false, "no_gun" end
-
-        -- snapshot + stop any active desync so our HRP is at the real
-        -- position before the shot. Server-side shooter-position
-        -- validation rejects the hit otherwise.
-        local restartName
-        if hook.desync and hook.desync.getMode then
-            local m = hook.desync.getMode()
-            if m and m ~= "off" and SHOOT_DESYNC_RESTARTERS[m] then
-                restartName = SHOOT_DESYNC_RESTARTERS[m]
-                hook.desync.stop()
-            end
-        end
-
-        -- Now read myPos AFTER the desync stopped (HRP is back at the
-        -- real position) so arg2 matches what the server has for us.
-        local myPos = myPosCFrame()
-        if not myPos then
-            if restartName and hook.desync and hook.desync[restartName] then
-                pcall(function() hook.desync[restartName]() end)
-            end
-            return false, "no_my_hrp"
-        end
-
-        -- Canonical payload from MM2 captures:
-        --   arg1 = target's HumanoidRootPart CFrame
-        --   arg2 = shooter HRP position with IDENTITY rotation
-        --          (CFrame.new(x, y, z) with default basis)
-        local ok, err = pcall(function() remote:FireServer(theirCF, myPos) end)
-        if not ok then
-            print("[decay.lua] Shoot FireServer error:", err)
-        end
-
-        -- restart desync after a brief grace period so the shot has
-        -- time to register server-side before we vanish again
-        if restartName then
-            task.delay(0.2, function()
-                if hook.desync and hook.desync[restartName] then
-                    pcall(function() hook.desync[restartName]() end)
-                end
-            end)
-        end
-        return true
+    -- Shoot whoever the fakepos resolver is locked onto, aimed at the
+    -- exact part it tps you onto (their HumanoidRootPart).
+    local function shootResolverFire()
+        local getT = getgenv()._F_FAKEPOS_GET
+        local plr  = getT and getT()
+        if typeof(plr) ~= "Instance" or not plr:IsA("Player") then return false, "no_target" end
+        if hook.whitelist and hook.whitelist.contains(plr) then return false, "no_target" end
+        local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false, "no_victim_hrp" end
+        return fireShootAt(hrp.CFrame)
     end
 
     -- ---------- Auto-pickup ----------
@@ -649,6 +662,9 @@ hook.games.mm2 = (function()
         shootMurderer = {
             fire = shootMurdererFire,
         },
+        shootResolver = {
+            fire = shootResolverFire,
+        },
     }
 end)()
 
@@ -694,7 +710,8 @@ local SHOOT_ERR = {
     no_gun        = "You don't have the Gun. Only the Sheriff can shoot.",
     no_my_hrp     = "Your character isn't loaded yet.",
     no_murderer   = "No player is holding the [Knife] tool right now.",
-    no_victim_hrp = "Murderer's character isn't loaded.",
+    no_victim_hrp = "Target's character isn't loaded.",
+    no_target     = "No fakepos resolver target. Lock one with the Target key first.",
 }
 local function tryShoot()
     local ok, reason = mm2.shootMurderer.fire()
@@ -702,6 +719,13 @@ local function tryShoot()
 end
 Main:NewButton("Shoot murderer", tryShoot)
 Main:NewKeybind("Shoot murderer key", Enum.KeyCode.K, function() tryShoot() end)
+-- shoot whoever the fakepos resolver is locked onto (the part it tps you to)
+local function tryShootResolver()
+    local ok, reason = mm2.shootResolver.fire()
+    if not ok then notify(SHOOT_ERR[reason] or ("Shoot failed: " .. tostring(reason)), 3, "error") end
+end
+Main:NewButton("Shoot resolver target", tryShootResolver)
+Main:NewKeybind("Shoot resolver key", Enum.KeyCode.J, function() tryShootResolver() end)
 
 -- ---------- Murderer: knife kill ----------
 -- Uses your Knife tool's own remotes: KnifeStabbed (the swing) then
