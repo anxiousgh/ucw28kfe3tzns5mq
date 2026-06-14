@@ -835,10 +835,7 @@ local function viewPlayer(plr)
     _viewConn=plr.CharacterAdded:Connect(function() task.wait(0.1); applySubject() end)
 end
 
--- connection-glue fling: stick to the target with an AlignPosition constraint
--- (resolved by physics every step -> tracks their LIVE position continuously, no
--- TP chase) and spin violently with an AngularVelocity constraint. The sustained
--- glued contact + spin flings them. You actually move onto them, then snap back.
+-- spin-desync fling
 local function flingPlayer(plr)
     if typeof(plr)=="string" then plr=findPlayerByName(plr) end
     if not plr then return end
@@ -847,41 +844,35 @@ local function flingPlayer(plr)
     local lhrp=char:FindFirstChild("HumanoidRootPart"); if not lhrp then return end
     local savedCF=lhrp.CFrame
     task.spawn(function()
-        local hrp=lhrp
-        local hum=char:FindFirstChildOfClass("Humanoid")
-        -- PlatformStand so the humanoid stops fighting the spin
-        if hum then pcall(function() hum.PlatformStand=true end) end
-        -- the "connection": Attachment + constraints on our own HRP (we own it)
-        local att=Instance.new("Attachment"); att.Parent=hrp
-        local ap=Instance.new("AlignPosition")
-        ap.Mode=Enum.PositionAlignmentMode.OneAttachment
-        ap.Attachment0=att; ap.ApplyAtCenterOfMass=true
-        ap.MaxForce=math.huge; ap.MaxVelocity=math.huge; ap.Responsiveness=200
-        ap.Parent=hrp
-        local av=Instance.new("AngularVelocity")
-        av.Attachment0=att; av.RelativeTo=Enum.ActuatorRelativeTo.World
-        av.MaxTorque=math.huge; av.AngularVelocity=Vector3.new(1,1,1)*120
-        av.Parent=hrp
-        local hb
-        hb=RunService.Heartbeat:Connect(function()
+        local _angle=0; local _savedVel
+        local _hbConn,_rsConn
+        _hbConn=RunService.Heartbeat:Connect(function()
+            local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
             local tc=target.Character; local th=tc and tc:FindFirstChild("HumanoidRootPart")
-            if not th or not ap.Parent then return end
-            ap.Position=th.Position   -- glue to their live position every step
+            if not h or not th then return end
+            _savedVel=h.AssemblyLinearVelocity; _angle=(_angle+120)%360
+            -- snap onto the target's LIVE position + spin hard; THIS replicates
+            h.CFrame=th.CFrame*CFrame.new(0,0,0.5)*CFrame.Angles(math.rad(_angle),math.rad(_angle*2),math.rad(_angle*0.5))
+            h.AssemblyLinearVelocity=Vector3.new(1,1,1)*16384
         end)
+        _rsConn=RunService.RenderStepped:Connect(function()
+            -- keep our LOCAL view put (we don't actually move; the server flings them)
+            local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
+            if h then h.CFrame=savedCF; if _savedVel then h.AssemblyLinearVelocity=_savedVel end end
+        end)
+        -- the Heartbeat connection does the work (snap+spin on the target);
+        -- just hold for the duration, bailing if either character despawns
         local deadline=tick()+2.5
         while tick()<deadline do
-            if not target.Character or not lplr.Character or not char.Parent then break end
+            if not target.Character or not lplr.Character then break end
             task.wait()
         end
-        if hb then hb:Disconnect() end
-        pcall(function() ap:Destroy() end)
-        pcall(function() av:Destroy() end)
-        pcall(function() att:Destroy() end)
-        if hum then pcall(function() hum.PlatformStand=false end) end
+        if _hbConn then _hbConn:Disconnect() end
+        if _rsConn then _rsConn:Disconnect() end
         if lplr.Character then
             local lh=lplr.Character:FindFirstChild("HumanoidRootPart")
             if lh then
-                lh.Anchored=true; lh.AssemblyLinearVelocity=Vector3.zero; lh.AssemblyAngularVelocity=Vector3.zero; lh.CFrame=savedCF
+                lh.Anchored=true; lh.AssemblyLinearVelocity=Vector3.zero; lh.CFrame=savedCF
                 task.delay(1,function() if lh and lh.Parent then lh.Anchored=false end end)
             end
         end
