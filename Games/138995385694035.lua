@@ -845,12 +845,54 @@ hook.games.hoodCustoms = hook.games.hoodCustoms or {}
 hook.games.hoodCustoms.isKnocked = _hcIsKnocked
 hook.games.hoodCustoms.isGrabbed = _hcIsGrabbed
 
+-- target's "already stomped" flag: BodyEffects.Dead == true
+local function _targetDead(plr)
+    if not plr then return false end
+    local function isTrue(node)
+        local fx = node and node:FindFirstChild("BodyEffects")
+        local d  = fx and fx:FindFirstChild("Dead")
+        return d ~= nil and d.Value == true
+    end
+    if isTrue(plr.Character) then return true end
+    local wsp   = workspace:FindFirstChild("Players")
+    local chars = wsp and wsp:FindFirstChild("Characters")
+    return isTrue(chars and chars:FindFirstChild(plr.Name))
+end
+hook.games.hoodCustoms.isStomped = _targetDead
+
+-- desync our server position onto `pos` (custom desync) and return a restore fn
+-- that re-applies whatever desync was active BEFORE (re-void / re-sky / etc) -
+-- or stops it if none - so this is compatible with voidshoot / any running
+-- desync (we go back into it, not off).
+local function _desyncToRestore(pos)
+    local d = hook.desync
+    if not d or not d.startCustom then return function() end end
+    local prevMode   = (d.getMode and d.getMode()) or "off"
+    local prevCustom = (prevMode == "custom" and d.getCustomPos and d.getCustomPos()) or nil
+    d.setCustomPos(pos.X, pos.Y, pos.Z)
+    d.startCustom()
+    return function()
+        if     prevMode == "void"      then d.startVoid()
+        elseif prevMode == "voidspam"  then d.startVoidspam()
+        elseif prevMode == "sky"       then d.startSky()
+        elseif prevMode == "spin"      then d.startSpin()
+        elseif prevMode == "velocity"  then d.startVelocity()
+        elseif prevMode == "freeze"    then d.startFreeze()
+        elseif prevMode == "raknet"    then d.startRaknet()
+        elseif prevMode == "invisible" then d.startInvisible()
+        elseif prevMode == "custom" and prevCustom then
+            d.setCustomPos(prevCustom.X, prevCustom.Y, prevCustom.Z); d.startCustom()
+        else d.stop() end
+    end
+end
+
 hook.games.hoodCustoms.autoStomp = (function()
     local conn
     local last = 0
     local radius, vertUp, vertDown = 5, 7, 1
     local interval = 0
     local rageTargets = false
+    local stompTarget, stompRestore = nil, nil   -- current targets-mode victim + desync restore
 
     local function someoneBelow()
         local lc = lplr.Character
@@ -862,6 +904,8 @@ hook.games.hoodCustoms.autoStomp = (function()
             local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then continue end
             local hum = char:FindFirstChildOfClass("Humanoid")
             if not hum or hum.Health <= 0 then continue end
+            -- only knocked players who aren't already stomped (Dead) are worth a stomp
+            if not _hcIsKnocked(p) or _targetDead(p) then continue end
             local d = lhrp.Position - hrp.Position
             local horizD = Vector2.new(d.X, d.Z).Magnitude
             if horizD <= radius and d.Y <= vertUp and d.Y >= -vertDown then return true end
@@ -878,15 +922,30 @@ hook.games.hoodCustoms.autoStomp = (function()
             local me = getMainEvent()
             if not me then return end
             if rageTargets then
+                -- finishing the current victim?
+                if stompTarget then
+                    local stillKnocked = _hcIsKnocked(stompTarget) and not _targetDead(stompTarget)
+                    if not (stompTarget.Parent and stompTarget.Character) or not stillKnocked then
+                        -- stomped (Dead) / gone / no longer knocked -> restore desync, drop
+                        if stompRestore then pcall(stompRestore); stompRestore = nil end
+                        stompTarget = nil
+                    else
+                        -- still knocked, not yet Dead -> stay desynced ON them + stomp
+                        local hrp = stompTarget.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp then hook.desync.setCustomPos(hrp.Position.X, hrp.Position.Y, hrp.Position.Z) end
+                        last = tick()
+                        pcall(function() me:FireServer("Stomp") end)
+                        return
+                    end
+                end
+                -- pick a new knocked, not-yet-Dead target and desync onto it
                 local list = hook.ragebot.getTargetList and hook.ragebot.getTargetList() or {}
                 for _, plr in ipairs(list) do
-                    if _hcIsKnocked(plr) then
-                        local char = plr.Character
-                        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+                    if _hcIsKnocked(plr) and not _targetDead(plr) then
+                        local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
                         if hrp then
-                            local lc   = lplr.Character
-                            local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
-                            if lhrp then _uprightTp(lc, lhrp, hrp.Position + Vector3.new(0, 3, 0), nil) end
+                            stompTarget  = plr
+                            stompRestore = _desyncToRestore(hrp.Position)
                             last = tick()
                             pcall(function() me:FireServer("Stomp") end)
                             return
@@ -904,6 +963,9 @@ hook.games.hoodCustoms.autoStomp = (function()
     local function stop()
         G.hcAutoStompActive = false
         if conn then conn:Disconnect(); conn = nil end
+        -- if we were desynced onto a victim, restore the previous desync state
+        if stompRestore then pcall(stompRestore); stompRestore = nil end
+        stompTarget = nil
     end
 
     local t = makeToggle(start, stop, "hcAutoStompActive")
@@ -1762,7 +1824,12 @@ hook.games.hoodCustoms.forceHit = (function()
             hits[i]    = { Normal = hitPos, Instance = part, Position = hitPos }
             targets[i] = { thePart = part, theOffset = Vector3.zero }
         end
-        local payload = { hits, targets, root.Position, root.Position, workspace:GetServerTimeNow() }
+        -- origin = where the SERVER thinks we are. While a desync is active that's
+        -- the spoofed spot (e.g. desynced onto the target), so the shot validates
+        -- against the origin check there. nil when not desynced -> our real HRP.
+        local sent   = getgenv()._F_DESYNC_SENT_CF
+        local origin = (sent and sent.Position) or root.Position
+        local payload = { hits, targets, origin, origin, workspace:GetServerTimeNow() }
         return pcall(function() me:FireServer("Shoot", payload) end)
     end
     -- Legacy single-shot wrapper kept for non-shotgun call sites
@@ -2725,27 +2792,27 @@ local function canEngage(plr)
     return not inForceField(plr) and appearanceLoaded(plr)
 end
 
--- TP shoot: equip DB -> save spot -> TP to target (upright) -> force-hit -> TP back ~1s
+-- TP shoot: desync our server position ONTO the target (custom desync, no
+-- physical TP) -> force-hit (origin follows the desynced spot so it validates
+-- point-blank) -> restore the previous desync 0.05s after the shot.
 local function tpShoot()
     if not hasAnyGun() then notify("No gun in inventory", 2, "alert"); return end
     local tgt = activeTargetAlive(); if not tgt then notify("No target", 2, "alert"); return end
     if inForceField(tgt) then notify("Target in forcefield", 2, "alert"); return end
     if not appearanceLoaded(tgt) then notify("Target not loaded", 2, "alert"); return end
-    local lc   = LocalPlayer.Character
-    local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
     local thrp = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-    if not lhrp or not thrp then return end
+    if not thrp then return end
     equipDoubleBarrel()
-    local saved     = lhrp.CFrame
     local wasActive = hc.forceHit.isActive()
     hc.forceHit.setTarget(tgt)
     if not wasActive then hc.forceHit.start() end
-    uprightTp(lc, lhrp, thrp.Position, thrp.CFrame.LookVector)
-    task.wait(0.12)
+    local restore = _desyncToRestore(thrp.Position)  -- desync onto them (silent)
+    task.wait(0.05)                                  -- let it replicate so we're "on" them
     pcall(hc.forceHit.fire)
-    -- TP back immediately after the shot
-    if lhrp and lhrp.Parent then uprightTp(lc, lhrp, saved.Position, saved.LookVector) end
-    if not wasActive then hc.forceHit.stop() end
+    task.delay(0.05, function()                      -- turn the desync off 0.05s after the shot
+        pcall(restore)
+        if not wasActive then hc.forceHit.stop() end
+    end)
 end
 
 local function gotoTarget()
@@ -3093,7 +3160,7 @@ regToggle(Utils, "HC_AutoStomp", "Auto stomp", false, function(v)
 end)
 regSlider(Utils, "HC_StompRadius", "Stomp radius", "", { min = 1, max = 50, default = math.floor(hc.autoStomp.getRadius() or 5) }, function(v) hc.autoStomp.setRadius(v) end)
 regSlider(Utils, "HC_StompInterval", "Min interval", " ms", { min = 0, max = 2000, default = math.floor((hc.autoStomp.getInterval() or 0) * 1000) }, function(v) hc.autoStomp.setInterval(v / 1000) end)
-regToggle(Utils, "HC_StompRage", "Stomp targets only", false, function(v) hc.autoStomp.setRageTargets(v) end)
+regToggle(Utils, "HC_StompRage", "Auto stomp targets", false, function(v) hc.autoStomp.setRageTargets(v) end)
 
 Utils:NewSection("Godmode")
 regToggle(Utils, "HC_Godmode", "Godmode", false, function(v)
