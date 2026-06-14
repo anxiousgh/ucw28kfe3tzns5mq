@@ -1403,13 +1403,13 @@ hook.games.hoodCustoms.forceHit = (function()
     local _lastTracerAt   = 0
     local MIN_TRACER_GAP  = 0.05
 
-    -- bypass the server's wall/range raycast: the server validates a shot by
-    -- raycasting origin -> hit (line of sight + within range). With this on we
-    -- send the origin a few studs from the TARGET (toward us) instead of our
-    -- HRP, so that validation ray is short, wall-free and in range - letting
-    -- out-of-range / through-wall hits register instead of erroring "wallbang".
+    -- bypass the server's wall/range raycast. The server validates a shot by
+    -- raycasting origin -> hits[].Position (line of sight + range), but applies
+    -- damage to targets[].thePart. With this on we set the VALIDATED point to
+    -- our own HRP (zero-length ray -> always in range, never blocked) while the
+    -- damage target stays the real enemy. origin stays our real HRP, so there's
+    -- no "origin mismatch" kick - we never move it.
     local bypassRaycast = false
-    local BYPASS_OFFSET = 3   -- studs from the hit back toward the shooter
 
     local lastFire = 0
 
@@ -1764,22 +1764,18 @@ hook.games.hoodCustoms.forceHit = (function()
         local root = c and c:FindFirstChild("HumanoidRootPart")
         if not root then return false end
         local hitPos  = part.Position
+        -- the point the server raycast-validates (origin -> this for LoS/range).
+        -- bypass on -> our own HRP, so that ray is zero-length and always valid;
+        -- the damage target below stays the real enemy part.
+        local vpos    = bypassRaycast and root.Position or hitPos
         local hits    = table.create(pelletCount)
         local targets = table.create(pelletCount)
         for i = 1, pelletCount do
-            hits[i]    = { Normal = hitPos, Instance = part, Position = hitPos }
+            hits[i]    = { Normal = hitPos, Instance = part, Position = vpos }
             targets[i] = { thePart = part, theOffset = Vector3.zero }
         end
-        -- origin the server validates against. Normally our HRP; with bypass on,
-        -- a point BYPASS_OFFSET studs from the target toward us so the server's
-        -- origin->hit raycast is short, wall-free and in range.
-        local origin = root.Position
-        if bypassRaycast then
-            local toMe = root.Position - hitPos
-            local mag  = toMe.Magnitude
-            origin = (mag > 0.1) and (hitPos + toMe.Unit * BYPASS_OFFSET) or hitPos
-        end
-        local payload = { hits, targets, origin, origin, workspace:GetServerTimeNow() }
+        -- origin stays our real HRP (never moved) so there's no origin mismatch
+        local payload = { hits, targets, root.Position, root.Position, workspace:GetServerTimeNow() }
         return pcall(function() me:FireServer("Shoot", payload) end)
     end
     -- Legacy single-shot wrapper kept for non-shotgun call sites
@@ -3002,15 +2998,19 @@ regDecimal(Combat, "HC_FHSoundVol", "Hit sound volume", "", 0, 3, 1, 10, functio
 -- Auto Shoot: force-hits LOCKED targets (from the Target tab) that are in
 -- range, visible (head LOS) and not knocked. Only people you've targeted.
 Combat:NewSection("Auto Shoot")
-local autoOn, autoRange, autoCooldown = false, 200, 0.15
+local autoOn, autoRange, autoCooldown, autoRequireVis = false, 200, 0.15, true
 regToggle(Combat, "HC_AutoShoot", "Auto shoot (targets only)", false, function(v) autoOn = v end)
 regSlider(Combat, "HC_AutoShootRange", "Range", "", { min = 10, max = 1000, default = 200 }, function(v) autoRange = v end)
 regDecimal(Combat, "HC_AutoShootCooldown", "Cooldown", "s", 0.05, 1, 0.15, 100, function(v) autoCooldown = v end)
+-- off = drop the line-of-sight requirement entirely (shoot targets through
+-- walls). Pair with "Bypass raycast" so the server accepts the through-wall hit.
+regToggle(Combat, "HC_AutoShootVis", "Require line of sight", true, function(v) autoRequireVis = v end)
 task.spawn(function()
     while not library.Unloaded do
         if autoOn then
-            -- highest-priority locked target in range + visible, skipping knocked
-            local p = bestTarget(knockCheckOn or ignoreKnockedOn, true, autoRange)
+            -- highest-priority locked target in range, skipping knocked; LOS
+            -- required only when autoRequireVis is on
+            local p = bestTarget(knockCheckOn or ignoreKnockedOn, autoRequireVis, autoRange)
             -- only shoot loaded players who aren't spawn-protected (ForceField)
             if p and canEngage(p) then hc.forceHit.setTarget(p); pcall(hc.forceHit.fire) end
         end
