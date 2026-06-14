@@ -1191,9 +1191,29 @@ local World = Window:NewTab("World")
 World:NewSection("Lighting")
 regToggle(World, "Fullbright", "Fullbright", false, function(v) if v then hook.fullbright.start() else hook.fullbright.stop() end end)
 regToggle(World, "GlobalShadows", "Global shadows", Lighting.GlobalShadows, W(function(v) Lighting.GlobalShadows = v end))
-regSlider(World, "LightBrightness", "Brightness", "", { min = 0, max = 10, default = math.floor(Lighting.Brightness) }, W(function(v) Lighting.Brightness = v end))
-regSlider(World, "LightClockTime", "Time of day", "", { min = 0, max = 24, default = math.floor(math.clamp(Lighting.ClockTime, 0, 24)) }, W(function(v) Lighting.ClockTime = v end))
-regSlider(World, "LightExposure", "Exposure", "", { min = -5, max = 5, default = math.floor(Lighting.ExposureCompensation) }, W(function(v) Lighting.ExposureCompensation = v end))
+-- Brightness / Time of day / Exposure: apply ONCE on change (no re-assert loop)
+-- unless "Lock lighting" is on, which then pins them every frame so the game /
+-- server can't change them back.
+local lockBrightness = math.floor(Lighting.Brightness)
+local lockClock      = math.floor(math.clamp(Lighting.ClockTime, 0, 24))
+local lockExposure   = math.floor(Lighting.ExposureCompensation)
+regSlider(World, "LightBrightness", "Brightness", "", { min = 0, max = 10, default = lockBrightness }, function(v) lockBrightness = v; pcall(function() Lighting.Brightness = v end) end)
+regSlider(World, "LightClockTime", "Time of day", "", { min = 0, max = 24, default = lockClock }, function(v) lockClock = v; pcall(function() Lighting.ClockTime = v end) end)
+regSlider(World, "LightExposure", "Exposure", "", { min = -5, max = 5, default = lockExposure }, function(v) lockExposure = v; pcall(function() Lighting.ExposureCompensation = v end) end)
+local lightLockConn
+regToggle(World, "LockLighting", "Lock lighting", false, function(v)
+    if lightLockConn then lightLockConn:Disconnect(); lightLockConn = nil end
+    if v then
+        lightLockConn = game:GetService("RunService").RenderStepped:Connect(function()
+            if library.Unloaded then if lightLockConn then lightLockConn:Disconnect(); lightLockConn = nil end return end
+            pcall(function()
+                Lighting.Brightness          = lockBrightness
+                Lighting.ClockTime           = lockClock
+                Lighting.ExposureCompensation = lockExposure
+            end)
+        end)
+    end
+end)
 regColor(World, "LightAmbient", "Ambient", "Gray", Wc(function(c) Lighting.Ambient = c end))
 regColor(World, "LightOutdoor", "Outdoor ambient", "Gray", Wc(function(c) Lighting.OutdoorAmbient = c end))
 World:NewButton("Restore default lighting", function()
