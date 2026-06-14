@@ -3168,7 +3168,8 @@ F.desync = (function()
     -- "track through desync": reject the target's teleport spikes (void/jitter
     -- desyncs) and orbit the smooth, plausible position instead of the spoof.
     local _orbitTrackReal = false
-    local _orbitEst, _orbitCand, _orbitCandN  -- spike-rejection estimator state
+    local _orbitBuf       = {}    -- recent raw target positions (clustering window)
+    local _orbitLastGood  = nil   -- last accepted "real" position
     local realCF, realLV, realAV
     local syncEnd  = 0
     local hbConn
@@ -3239,26 +3240,30 @@ F.desync = (function()
     -- the same Heartbeat (so it never fights the mode over the HRP). Circles the
     -- target player's position. Compatible with modes that don't touch the
     -- CFrame (e.g. Velocity); with a CFrame mode it just wins, last write.
-    -- best-effort "real position" of the target: rejects desync teleport spikes
-    -- (void/jitter) and locks the smooth, plausible position. A genuinely fast
-    -- move / legit teleport that STAYS for ~8 frames is accepted (re-lock); a
-    -- spoof that keeps jumping is never accepted, so we hold the last real spot.
+    -- best-effort "real position" of the target via CLUSTERING (seeding-free):
+    -- buffer recent replicated positions; the target's real spot is wherever they
+    -- cluster (smooth movement piles frames up in one area), while desync spoof
+    -- spikes (void/jitter) are scattered loners. Return the most RECENT position
+    -- that sits in a dense cluster -> the latest real spot, spikes skipped.
     -- Can't recover a position that was never sent (clean freeze/raknet) and will
-    -- settle onto a stable fake (sky/custom).
-    local ORBIT_MAX_STEP = 40   -- studs/frame a legit player could move
+    -- settle onto a stable fake (sky/custom) since that becomes the only cluster.
+    local ORBIT_WIN = 30   -- frames of history kept
+    local ORBIT_R   = 15   -- studs; within this counts as the same place
     local function orbitTargetPos(thrp)
         local raw = thrp.Position
         if not _orbitTrackReal then return raw end
-        if not _orbitEst then _orbitEst, _orbitCand, _orbitCandN = raw, nil, 0; return raw end
-        if (raw - _orbitEst).Magnitude <= ORBIT_MAX_STEP then
-            _orbitEst, _orbitCand, _orbitCandN = raw, nil, 0          -- smooth move -> accept
-        elseif _orbitCand and (raw - _orbitCand).Magnitude <= ORBIT_MAX_STEP then
-            _orbitCandN = (_orbitCandN or 0) + 1; _orbitCand = raw    -- a new spot is holding...
-            if _orbitCandN >= 8 then _orbitEst, _orbitCand, _orbitCandN = raw, nil, 0 end  -- ...real move
-        else
-            _orbitCand, _orbitCandN = raw, 1                          -- erratic spike -> ignore, hold
+        local b = _orbitBuf
+        b[#b + 1] = raw
+        while #b > ORBIT_WIN do table.remove(b, 1) end
+        if #b < 6 then _orbitLastGood = raw; return raw end   -- not enough data yet
+        for i = #b, 1, -1 do
+            local c = 0
+            for j = 1, #b do
+                if (b[j] - b[i]).Magnitude <= ORBIT_R then c = c + 1 end
+            end
+            if c >= 4 then _orbitLastGood = b[i]; return b[i] end  -- newest dense point = real
         end
-        return _orbitEst
+        return _orbitLastGood or raw   -- nothing dense this window -> hold last
     end
 
     local function applyOrbit(hrp)
@@ -3676,11 +3681,11 @@ F.desync = (function()
         setOrbitTarget  = function(name)
             _orbitName = name and tostring(name) or nil
             _orbitAngle = 0
-            _orbitEst, _orbitCand, _orbitCandN = nil, nil, 0   -- fresh estimator for the new target
+            _orbitBuf = {}; _orbitLastGood = nil   -- fresh estimator for the new target
         end,
         setOrbitTrackReal = function(b)
             _orbitTrackReal = b and true or false
-            _orbitEst, _orbitCand, _orbitCandN = nil, nil, 0
+            _orbitBuf = {}; _orbitLastGood = nil
         end,
         getOrbitTarget  = function() return _orbitName end,
         setOrbitRadius  = function(n) _orbitRadius = math.clamp(tonumber(n) or 8, 0, 1000) end,
