@@ -783,12 +783,15 @@ end
 -- you). Extrapolate forward by their velocity * that delay so you land on where
 -- they ACTUALLY are right now, instead of chasing where they were.
 local _Stats = game:GetService("Stats")
--- auto lead time = the current round-trip ping (seconds), read live every call.
--- no manual knob: the ping is measured and the velocity is taken from the
--- target's actual movement, so the prediction adapts on its own.
+-- Reading another player's HRP.Position lags their real (own-screen) position by
+-- MORE than your ping: your download + Roblox's character interpolation buffer
+-- (~0.1s) + their upload. Ping alone barely leads them -> prediction lands on the
+-- SERVER position. So lead = live ping + a replication buffer that covers the
+-- interpolation and (roughly) their upload.
+local REPL_BUFFER = 0.13
 local function _predictSeconds()
     local ok, ping = pcall(function() return _Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
-    return (ok and tonumber(ping) or 100) / 1000
+    return (ok and tonumber(ping) or 100) / 1000 + REPL_BUFFER
 end
 -- target HRP CFrame shifted forward by velocity * lead so it lands where they
 -- actually are now. `vel` overrides the read velocity (the fling passes a
@@ -799,6 +802,7 @@ local function _predictCF(ehrp, vel)
     if lead <= 0 then return ehrp.CFrame end
     return ehrp.CFrame + (vel or ehrp.AssemblyLinearVelocity) * lead
 end
+local _predHist = setmetatable({}, { __mode = "k" })  -- [player]={pos,t} for predictPos delta velocity
 
 local function gotoPlayer(plr)
     if typeof(plr)=="string" then plr=findPlayerByName(plr) end
@@ -2829,6 +2833,21 @@ F.players = {
     isFollowing = function() return _follow.target end,
     setFollowVisualize = followSetVisualize,
     getFollowVisualize = function() return _follow.viz end,
+    -- predicted real (own-screen) position of a player, for a debug marker
+    predictPos = function(plr)
+        if typeof(plr) == "string" then plr = findPlayerByName(plr) end
+        local thrp = plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        if not thrp then return nil end
+        local now = tick()
+        local h = _predHist[plr]
+        local vel = thrp.AssemblyLinearVelocity
+        if h and now > h.t then
+            local dv = (thrp.Position - h.pos) / (now - h.t)
+            if dv.Magnitude > 0.1 then vel = dv end
+        end
+        _predHist[plr] = { pos = thrp.Position, t = now }
+        return _predictCF(thrp, vel).Position
+    end,
 }
 
 --  AUTO-TARGETER
