@@ -1160,7 +1160,10 @@ regToggle(Misc, "AntiFling", "Anti-fling", false, function(v) if v then hook.ant
 regSlider(Misc, "AntiFlingCap", "Velocity cap", " stud/sec", { min = 100, max = 50000, default = 5000 }, function(v) hook.antiFling.setCap(v) end)
 
 Misc:NewSection("Enable chat")
-regToggle(Misc, "ForceChat", "Re-enable chat", false, function(v) if v then hook.forceChat.start() else hook.forceChat.stop() end end)
+regToggle(Misc, "ForceChat", "Re-enable chat", true, function(v) if v then hook.forceChat.start() else hook.forceChat.stop() end end)
+-- on by default (NewToggle doesn't fire its callback for the default state, and a
+-- saved config applies later via controls.set, overriding this if the user saved it off)
+hook.forceChat.start()
 
 Misc:NewSection("Proximity prompts")
 regToggle(Misc, "PromptInstant", "Instant activation", false, function(v) if v then hook.prompts.instantActivation.start() else hook.prompts.instantActivation.stop() end end)
