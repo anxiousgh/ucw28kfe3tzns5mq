@@ -593,18 +593,6 @@ hook.games.mm2 = (function()
         return fireShootAt(targetHitCF(victim.Character))
     end
 
-    -- Shoot whoever the fakepos resolver is locked onto, aimed at the
-    -- exact part it tps you onto (their HumanoidRootPart).
-    local function shootResolverFire()
-        local getT = getgenv()._F_FAKEPOS_GET
-        local plr  = getT and getT()
-        if typeof(plr) ~= "Instance" or not plr:IsA("Player") then return false, "no_target" end
-        if hook.whitelist and hook.whitelist.contains(plr) then return false, "no_target" end
-        local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return false, "no_victim_hrp" end
-        return fireShootAt(hrp.CFrame)
-    end
-
     -- ---------- Auto-pickup ----------
     local autoActive = false
     local autoThread
@@ -662,9 +650,6 @@ hook.games.mm2 = (function()
         shootMurderer = {
             fire = shootMurdererFire,
         },
-        shootResolver = {
-            fire = shootResolverFire,
-        },
     }
 end)()
 
@@ -711,7 +696,6 @@ local SHOOT_ERR = {
     no_my_hrp     = "Your character isn't loaded yet.",
     no_murderer   = "No player is holding the [Knife] tool right now.",
     no_victim_hrp = "Target's character isn't loaded.",
-    no_target     = "No fakepos resolver target. Lock one with the Target key first.",
 }
 local function tryShoot()
     local ok, reason = mm2.shootMurderer.fire()
@@ -719,13 +703,6 @@ local function tryShoot()
 end
 Main:NewButton("Shoot murderer", tryShoot)
 Main:NewKeybind("Shoot murderer key", Enum.KeyCode.K, function() tryShoot() end)
--- shoot whoever the fakepos resolver is locked onto (the part it tps you to)
-local function tryShootResolver()
-    local ok, reason = mm2.shootResolver.fire()
-    if not ok then notify(SHOOT_ERR[reason] or ("Shoot failed: " .. tostring(reason)), 3, "error") end
-end
-Main:NewButton("Shoot resolver target", tryShootResolver)
-Main:NewKeybind("Shoot resolver key", Enum.KeyCode.J, function() tryShootResolver() end)
 
 -- ---------- Murderer: knife kill ----------
 -- Uses your Knife tool's own remotes: KnifeStabbed (the swing) then
