@@ -366,7 +366,13 @@ regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, 
     function(v) hook.fakeLag.setAmount(v) end)
 Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
 
-
+-- ---- fakepos resolver ----
+-- When on, Goto (Players tab + HC tab) uses the connection-glue
+-- (PhysicsRepRootPart) to land on the target's RESOLVED real position instead of
+-- their fake/desynced replicated spot.
+Desync:NewSection("Fakepos resolver")
+regToggle(Desync, "FakeposResolver", "Fakepos resolver (goto real pos)", false,
+    function(v) hook.players.setFakeposResolver(v) end)
 
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
@@ -454,6 +460,11 @@ PlayersTab:NewButton("Fling", function() local p = selectedPlayer(); if p then h
             notify("No emote playing on " .. (p and p.Name or "?"), 2, "alert")
         end
     end)
+-- Fling normally uses the connection-glue (PhysicsRepRootPart) to stick onto the
+-- target. Desync mode instead spoofs your SERVER position onto them + spins, so
+-- your character never physically moves there.
+regToggle(PlayersTab, "FlingDesyncMode", "Fling: desync mode (no real move)", false,
+    function(v) hook.players.setFlingDesync(v) end)
 
 -- ============================================================
 --  VISUALS
