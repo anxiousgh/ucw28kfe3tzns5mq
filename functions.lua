@@ -804,9 +804,36 @@ local function _predictCF(ehrp, vel)
 end
 local _predHist = setmetatable({}, { __mode = "k" })  -- [player]={pos,t} for predictPos delta velocity
 
+-- fake pos spoofer: when on, goto uses the connection-glue (fakepos resolver)
+-- method instead of a plain upright teleport.
+local _fakeposSpoof = false
+local function _fakeposTp(plr)
+    local th=plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    local h=lplr.Character and lplr.Character:FindFirstChild("HumanoidRootPart")
+    if not th or not h then return end
+    task.spawn(function()
+        -- maintain the glue briefly so it lands, then un-glue and stay put
+        local deadline=tick()+0.4
+        while tick()<deadline do
+            local c=lplr.Character; local hh=c and c:FindFirstChild("HumanoidRootPart")
+            local tc=plr.Character; local tt=tc and tc:FindFirstChild("HumanoidRootPart")
+            if not hh or not tt then break end
+            pcall(function() hh:SetNetworkOwner(lplr) end)
+            pcall(function() tt:SetNetworkOwner(lplr) end)
+            pcall(function() if sethiddenproperty then sethiddenproperty(hh,"PhysicsRepRootPart",tt) end end)
+            hh.CFrame=tt.CFrame
+            hh.AssemblyLinearVelocity=Vector3.zero
+            task.wait()
+        end
+        local c=lplr.Character; local hh=c and c:FindFirstChild("HumanoidRootPart")
+        if hh then pcall(function() if sethiddenproperty then sethiddenproperty(hh,"PhysicsRepRootPart",hh) end end) end
+    end)
+end
+
 local function gotoPlayer(plr)
     if typeof(plr)=="string" then plr=findPlayerByName(plr) end
     if not plr then return end
+    if _fakeposSpoof then return _fakeposTp(plr) end
     local tHrp=plr.Character and plr.Character:FindFirstChild("HumanoidRootPart"); if not tHrp then return end
     local lc=lplr.Character
     local hrp=lc and lc:FindFirstChild("HumanoidRootPart")
@@ -2921,6 +2948,9 @@ F.players = {
     isFollowing = function() return _follow.target end,
     setFollowVisualize = followSetVisualize,
     getFollowVisualize = function() return _follow.viz end,
+    -- fake pos spoofer: route goto through the connection-glue method
+    setFakeposSpoof = function(v) _fakeposSpoof = v and true or false end,
+    getFakeposSpoof = function() return _fakeposSpoof end,
     -- predicted real (own-screen) position of a player, for a debug marker
     predictPos = function(plr)
         if typeof(plr) == "string" then plr = findPlayerByName(plr) end

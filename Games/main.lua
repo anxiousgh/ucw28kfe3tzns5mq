@@ -228,7 +228,6 @@ regToggle(Movement, "ClickTp", "Click teleport", false, function(v) if v then ho
 -- Physical mode glues our character around them; "Desync position" spoofs our
 -- position to the orbit point while we stay put locally.
 Movement:NewSection("Fakepos orbit")
-Movement:NewLabel("Orbits your selected player.", "left")
 regToggle(Movement, "FakeOrbit", "Fakepos orbit", false, function(v)
     if v then
         if not hook.fakeOrbit.getTarget() then
@@ -238,7 +237,7 @@ regToggle(Movement, "FakeOrbit", "Fakepos orbit", false, function(v)
     else
         hook.fakeOrbit.stop()
     end
-end)
+end):AddKeybind(Enum.KeyCode.Unknown, "Fakepos Orbit Toggle")
 regToggle(Movement, "FakeOrbitDesync", "Desync position", false,
     function(v) hook.fakeOrbit.setDesync(v) end)
 regToggle(Movement, "FakeOrbitFace", "Always face target", true,
@@ -505,6 +504,13 @@ do
         else b.Enabled = false end
     end)
 end
+
+-- ---- fake pos spoofer ----
+-- Routes the Goto buttons (Players tab + Hood Customs target) through the
+-- fakepos resolver (connection-glue) method instead of a plain teleport.
+Desync:NewSection("Fake pos spoofer")
+regToggle(Desync, "FakeposSpoofer", "Fake pos spoofer", false,
+    function(v) hook.players.setFakeposSpoof(v) end)
 
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
 
