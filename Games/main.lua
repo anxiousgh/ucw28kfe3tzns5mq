@@ -395,17 +395,39 @@ do
     local RunSvc2  = game:GetService("RunService")
     local PlayersS = game:GetService("Players")
     local marker, buf, last, on = nil, {}, nil, false
+    -- ignore-list of every character so the ground ray hits the MAP, not bodies
+    local function chars()
+        local t = {}
+        for _, p in ipairs(PlayersS:GetPlayers()) do if p.Character then t[#t + 1] = p.Character end end
+        return t
+    end
+    -- is `pos` standing on the map? (real players are; sky / void spoofs aren't)
+    local function grounded(pos, ignore)
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = ignore
+        rp.IgnoreWater = true
+        return workspace:Raycast(pos + Vector3.new(0, 1, 0), Vector3.new(0, -12, 0), rp) ~= nil
+    end
+    local function keyOf(p) return math.floor(p.X / 4) .. "," .. math.floor(p.Y / 4) .. "," .. math.floor(p.Z / 4) end
     local function est(hrp)
         local raw = hrp.Position
-        buf[#buf + 1] = raw
-        while #buf > 30 do table.remove(buf, 1) end
-        if #buf < 6 then last = raw; return raw end
-        for i = #buf, 1, -1 do
-            local c = 0
-            for j = 1, #buf do if (buf[j] - buf[i]).Magnitude <= 15 then c = c + 1 end end
-            if c >= 4 then last = buf[i]; return buf[i] end
+        buf[#buf + 1] = { p = raw, g = grounded(raw, chars()) }
+        while #buf > 40 do table.remove(buf, 1) end
+        -- the static spoof (freeze/custom) is the exact spot that repeats most
+        local freq, domKey, domN = {}, nil, 0
+        for _, e in ipairs(buf) do
+            local k = keyOf(e.p); freq[k] = (freq[k] or 0) + 1
+            if freq[k] > domN then domN, domKey = freq[k], k end
         end
-        return last or raw
+        local excludeDom = domN >= #buf * 0.4   -- one spot is 40%+ of frames -> spoof
+        -- 1) prefer the newest GROUNDED frame that isn't the static spoof
+        for i = #buf, 1, -1 do
+            if buf[i].g and not (excludeDom and keyOf(buf[i].p) == domKey) then last = buf[i].p; return buf[i].p end
+        end
+        -- 2) nothing else grounded -> they're probably genuinely standing still
+        for i = #buf, 1, -1 do if buf[i].g then last = buf[i].p; return buf[i].p end end
+        return last or raw   -- nothing grounded at all -> can't see them (clean block)
     end
     local function ensureMarker()
         if marker and marker.Parent then return marker end
