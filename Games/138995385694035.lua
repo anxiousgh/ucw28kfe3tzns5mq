@@ -897,9 +897,13 @@ hook.games.hoodCustoms.autoStomp = (function()
     local rageTargets = false
     local stompTarget = nil   -- current targets-mode victim
     local STOMP_Y = 3         -- studs above their HRP so our feet rest on their body
+    local savedCF = nil       -- our real local pose (restored each render so we stay put)
+    local RESTORE_BIND = "wh_stomp_restore"
+    local restoreBound = false
 
-    -- fakepos resolver (connection-glue): physically teleport directly on top of
-    -- the victim and replicate relative to them, so we're always standing on them.
+    -- fakepos resolver (connection-glue) + DESYNC: glue our physics-rep root onto
+    -- the victim and spoof our pose to on-top of them, but restore our real pose
+    -- each render frame so we stay put locally (server sees us standing on them).
     local function glueAbove(hrp)
         local lc = lplr.Character
         local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
@@ -907,14 +911,20 @@ hook.games.hoodCustoms.autoStomp = (function()
         pcall(function() lhrp:SetNetworkOwner(lplr) end)
         pcall(function() hrp:SetNetworkOwner(lplr) end)
         pcall(function() if sethiddenproperty then sethiddenproperty(lhrp, "PhysicsRepRootPart", hrp) end end)
-        lhrp.CFrame = CFrame.new(hrp.Position + Vector3.new(0, STOMP_Y, 0))
-        lhrp.AssemblyLinearVelocity = Vector3.zero
-        lhrp.AssemblyAngularVelocity = Vector3.zero
+        savedCF = lhrp.CFrame                                          -- our real spot
+        local onTop = CFrame.new(hrp.Position + Vector3.new(0, STOMP_Y, 0))
+        lhrp.CFrame = onTop                                           -- spoofed pose replicates on top
+        getgenv()._F_DESYNC_SENT_CF = onTop
     end
     local function unglue()
         local lc = lplr.Character
         local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
-        if lhrp then pcall(function() if sethiddenproperty then sethiddenproperty(lhrp, "PhysicsRepRootPart", lhrp) end end) end
+        if lhrp then
+            pcall(function() if sethiddenproperty then sethiddenproperty(lhrp, "PhysicsRepRootPart", lhrp) end end)
+            if savedCF then pcall(function() lhrp.CFrame = savedCF end) end
+        end
+        getgenv()._F_DESYNC_SENT_CF = nil
+        savedCF = nil
     end
 
     local function someoneBelow()
@@ -985,12 +995,22 @@ hook.games.hoodCustoms.autoStomp = (function()
             last = tick()
             pcall(function() me:FireServer("Stomp") end)
         end)
+        -- restore our real pose each render frame so the desync stays put locally
+        if restoreBound then pcall(function() RunService:UnbindFromRenderStep(RESTORE_BIND) end) end
+        RunService:BindToRenderStep(RESTORE_BIND, Enum.RenderPriority.First.Value, function()
+            if not G.hcAutoStompActive or not (rageTargets and stompTarget) then return end
+            local lc = lplr.Character
+            local lhrp = lc and lc:FindFirstChild("HumanoidRootPart")
+            if lhrp and savedCF then lhrp.CFrame = savedCF end
+        end)
+        restoreBound = true
     end
 
     local function stop()
         G.hcAutoStompActive = false
         if conn then conn:Disconnect(); conn = nil end
-        -- un-glue so the server stops pinning us onto the last victim
+        if restoreBound then pcall(function() RunService:UnbindFromRenderStep(RESTORE_BIND) end); restoreBound = false end
+        -- un-glue + restore our real pose
         unglue()
         stompTarget = nil
     end
