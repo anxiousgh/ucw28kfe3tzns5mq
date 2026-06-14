@@ -377,6 +377,10 @@ regToggle(Desync, "OrbitEnabled", "Enable orbit", false, function(v) hook.desync
 Desync:NewButton("Lock orbit to selected player", function()
     if setOrbitFromSelection then setOrbitFromSelection() end
 end)
+-- best-effort: reject the target's desync teleport spikes and orbit their real
+-- spot. Can't beat a clean freeze/raknet (real pos is never sent to you).
+regToggle(Desync, "OrbitTrackReal", "Track through desync (ignore teleport spikes)", false,
+    function(v) hook.desync.setOrbitTrackReal(v) end)
 regSlider(Desync, "OrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
     function(v) hook.desync.setOrbitRadius(v) end)
 regDecimal(Desync, "OrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,

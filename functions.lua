@@ -3165,6 +3165,10 @@ F.desync = (function()
     local _orbitSpeed   = 4      -- degrees per heartbeat
     local _orbitHeight  = 0
     local _orbitAngle   = 0
+    -- "track through desync": reject the target's teleport spikes (void/jitter
+    -- desyncs) and orbit the smooth, plausible position instead of the spoof.
+    local _orbitTrackReal = false
+    local _orbitEst, _orbitCand, _orbitCandN  -- spike-rejection estimator state
     local realCF, realLV, realAV
     local syncEnd  = 0
     local hbConn
@@ -3235,6 +3239,28 @@ F.desync = (function()
     -- the same Heartbeat (so it never fights the mode over the HRP). Circles the
     -- target player's position. Compatible with modes that don't touch the
     -- CFrame (e.g. Velocity); with a CFrame mode it just wins, last write.
+    -- best-effort "real position" of the target: rejects desync teleport spikes
+    -- (void/jitter) and locks the smooth, plausible position. A genuinely fast
+    -- move / legit teleport that STAYS for ~8 frames is accepted (re-lock); a
+    -- spoof that keeps jumping is never accepted, so we hold the last real spot.
+    -- Can't recover a position that was never sent (clean freeze/raknet) and will
+    -- settle onto a stable fake (sky/custom).
+    local ORBIT_MAX_STEP = 40   -- studs/frame a legit player could move
+    local function orbitTargetPos(thrp)
+        local raw = thrp.Position
+        if not _orbitTrackReal then return raw end
+        if not _orbitEst then _orbitEst, _orbitCand, _orbitCandN = raw, nil, 0; return raw end
+        if (raw - _orbitEst).Magnitude <= ORBIT_MAX_STEP then
+            _orbitEst, _orbitCand, _orbitCandN = raw, nil, 0          -- smooth move -> accept
+        elseif _orbitCand and (raw - _orbitCand).Magnitude <= ORBIT_MAX_STEP then
+            _orbitCandN = (_orbitCandN or 0) + 1; _orbitCand = raw    -- a new spot is holding...
+            if _orbitCandN >= 8 then _orbitEst, _orbitCand, _orbitCandN = raw, nil, 0 end  -- ...real move
+        else
+            _orbitCand, _orbitCandN = raw, 1                          -- erratic spike -> ignore, hold
+        end
+        return _orbitEst
+    end
+
     local function applyOrbit(hrp)
         if not _orbitEnabled then return end
         local tgt  = _orbitName and game:GetService("Players"):FindFirstChild(_orbitName)
@@ -3245,7 +3271,7 @@ F.desync = (function()
         local a   = math.rad(_orbitAngle)
         local off = Vector3.new(math.cos(a) * _orbitRadius, _orbitHeight, math.sin(a) * _orbitRadius)
         local rot = hrp.CFrame - hrp.CFrame.Position
-        hrp.CFrame = CFrame.new(thrp.Position + off) * rot
+        hrp.CFrame = CFrame.new(orbitTargetPos(thrp) + off) * rot
     end
 
     local function bind()
@@ -3647,7 +3673,15 @@ F.desync = (function()
         -- alongside a non-CFrame desync (Velocity) or on its own.
         setOrbitEnabled = setOrbitEnabled,
         isOrbitEnabled  = function() return _orbitEnabled end,
-        setOrbitTarget  = function(name) _orbitName = name and tostring(name) or nil; _orbitAngle = 0 end,
+        setOrbitTarget  = function(name)
+            _orbitName = name and tostring(name) or nil
+            _orbitAngle = 0
+            _orbitEst, _orbitCand, _orbitCandN = nil, nil, 0   -- fresh estimator for the new target
+        end,
+        setOrbitTrackReal = function(b)
+            _orbitTrackReal = b and true or false
+            _orbitEst, _orbitCand, _orbitCandN = nil, nil, 0
+        end,
         getOrbitTarget  = function() return _orbitName end,
         setOrbitRadius  = function(n) _orbitRadius = math.clamp(tonumber(n) or 8, 0, 1000) end,
         setOrbitSpeed   = function(n) _orbitSpeed  = math.clamp(tonumber(n) or 4, 0, 90) end,
