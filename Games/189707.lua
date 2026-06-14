@@ -19,57 +19,39 @@ local lplr       = Players.LocalPlayer
 
 -- ============================================================
 --  NO FALL DAMAGE
---  Core mechanic (per the reference): disable the Humanoid's Dead
---  state so a fall (or anything) can't kill us. Re-applied every
---  frame because the game re-enables it on respawn, and we also
---  restore any health a fall/landing takes (short grace window for
---  damage the game applies a frame or two after touchdown) so it's
---  truly "no fall damage", not just "no death". Re-hooks on respawn.
+--  Polling on Heartbeat + airborne-state detection proved unreliable
+--  (a one-frame fall kill slips through, and disaster launches don't
+--  always read as Freefall). New approach:
+--    * HealthChanged: the instant our health drops, snap it back to
+--      full -- catches even an instant-kill before the next frame.
+--    * Heartbeat backstop: top health off + keep the Dead state
+--      disabled so we can't die even if a drop is missed.
+--  Re-hooks on respawn so it survives death.
 -- ============================================================
 local noFall = false
 do
-    local hum, conn
-    local groundedHealth = nil
-    local wasAirborne    = false
-    local landGraceUntil = 0
-    local GRACE = 0.5   -- seconds after landing we keep restoring
+    local hum, hbConn, hcConn
+
+    local function topUp()
+        if noFall and hum and hum.Parent and hum.Health < hum.MaxHealth then
+            hum.Health = hum.MaxHealth
+        end
+    end
 
     local function watch(char)
         hum = char:WaitForChild("Humanoid")
-        groundedHealth = hum.Health
-        wasAirborne    = false
-        landGraceUntil = 0
-        if conn then conn:Disconnect() end
-        conn = RunService.Heartbeat:Connect(function()
+        if hbConn then hbConn:Disconnect() end
+        if hcConn then hcConn:Disconnect() end
+
+        -- instant restore the moment any damage lands
+        hcConn = hum.HealthChanged:Connect(function() topUp() end)
+
+        hbConn = RunService.Heartbeat:Connect(function()
             if not hum or hum.Parent == nil then return end
-            -- death immunity: disabled while ON, restored while OFF. Re-applied
-            -- every frame so it sticks even if the game flips it back.
+            -- death immunity: off while ON, restored while OFF; re-applied every
+            -- frame so it sticks even if the game flips it back on respawn.
             pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, not noFall) end)
-            -- while disabled, keep the baseline tracking current health
-            if not noFall then
-                if hum.Health > 0 then groundedHealth = hum.Health end
-                wasAirborne = false
-                return
-            end
-            local st = hum:GetState()
-            local airborne = st == Enum.HumanoidStateType.Freefall
-                          or st == Enum.HumanoidStateType.Jumping
-            if airborne then
-                wasAirborne = true   -- freeze the baseline at the pre-fall health
-            else
-                if wasAirborne then
-                    landGraceUntil = tick() + GRACE
-                    wasAirborne = false
-                end
-                if tick() < landGraceUntil then
-                    -- just landed: undo the fall/landing damage
-                    if groundedHealth and groundedHealth > 0 and hum.Health < groundedHealth then
-                        hum.Health = groundedHealth
-                    end
-                else
-                    if hum.Health > 0 then groundedHealth = hum.Health end   -- accept normal changes
-                end
-            end
+            topUp()
         end)
     end
 
