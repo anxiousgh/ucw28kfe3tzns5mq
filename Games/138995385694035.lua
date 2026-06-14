@@ -886,6 +886,8 @@ local function _desyncToRestore(pos)
         else d.stop() end
     end
 end
+-- expose so code outside this do-block (tpShoot, etc.) can reach it
+hook.games.hoodCustoms._desyncToRestore = _desyncToRestore
 
 hook.games.hoodCustoms.autoStomp = (function()
     local conn
@@ -2827,7 +2829,7 @@ local function tpShoot()
     local wasActive = hc.forceHit.isActive()
     hc.forceHit.setTarget(tgt)
     if not wasActive then hc.forceHit.start() end
-    local restore = _desyncToRestore(thrp.Position)  -- desync onto them (silent)
+    local restore = hc._desyncToRestore(thrp.Position)  -- desync onto them (silent)
     task.wait(0.05)                                  -- let it replicate so we're "on" them
     pcall(hc.forceHit.fire)
     task.delay(0.05, function()                      -- turn the desync off 0.05s after the shot
