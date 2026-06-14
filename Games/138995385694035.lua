@@ -1403,15 +1403,6 @@ hook.games.hoodCustoms.forceHit = (function()
     local _lastTracerAt   = 0
     local MIN_TRACER_GAP  = 0.05
 
-    -- bypass v3: pull the shot origin+aim toward the target, but only enough to
-    -- bring the range to BYPASS_MAX_DIST studs - never onto the target. For a
-    -- target past 200 studs the origin sits exactly 200 from it (displacement =
-    -- dist-200, smallest possible), keeping it as near our real HRP as we can
-    -- while shrinking the range the server validates. origin == aim so the
-    -- spread geometry stays consistent (what avoided the spread-pattern flag).
-    local bypassRaycast  = false
-    local BYPASS_MAX_DIST = 200
-
     local lastFire = 0
 
     local _RS = game:GetService("ReplicatedStorage")
@@ -1771,19 +1762,7 @@ hook.games.hoodCustoms.forceHit = (function()
             hits[i]    = { Normal = hitPos, Instance = part, Position = hitPos }
             targets[i] = { thePart = part, theOffset = Vector3.zero }
         end
-        -- origin + aim, moved together so the spread stays consistent. bypass:
-        -- if the target is past BYPASS_MAX_DIST, sit them BYPASS_MAX_DIST studs
-        -- from the target (never on it) so the validated range is capped while
-        -- the origin stays as close to our real HRP as possible.
-        local origin = root.Position
-        if bypassRaycast then
-            local toTarget = hitPos - root.Position
-            local dist = toTarget.Magnitude
-            if dist > BYPASS_MAX_DIST then
-                origin = hitPos - toTarget.Unit * BYPASS_MAX_DIST
-            end
-        end
-        local payload = { hits, targets, origin, origin, workspace:GetServerTimeNow() }
+        local payload = { hits, targets, root.Position, root.Position, workspace:GetServerTimeNow() }
         return pcall(function() me:FireServer("Shoot", payload) end)
     end
     -- Legacy single-shot wrapper kept for non-shotgun call sites
@@ -2224,8 +2203,6 @@ hook.games.hoodCustoms.forceHit = (function()
     t.setHitPart    = function(name) hitPartName = name or "Head" end
     t.getHitPart    = function() return hitPartName end
     t.setCooldown   = function(n) cooldown = math.max(0, tonumber(n) or 0.2) end
-    t.setBypassRaycast = function(v) bypassRaycast = v == true end
-    t.getBypassRaycast = function() return bypassRaycast end
     -- setShotgunMode / getShotgunMode removed - there's only one path now
     -- (synth, the canonical-payload direct FireServer). Kept as no-op
     -- stubs so the loader doesn't crash if it still tries to call them.
@@ -2977,9 +2954,6 @@ regToggle(Combat, "HC_ForceHit", "Force Hit (needs Auto Shoot)", false, function
 end)
 regDropdown(Combat, "HC_ForceHitPart", "Hit part", "Head", { "Head", "UpperTorso", "HumanoidRootPart" }, false, function(v) hc.forceHit.setHitPart(v) end)
 regSlider(Combat, "HC_ForceHitCooldown", "Cooldown", " ms", { min = 0, max = 1000, default = 200 }, function(v) hc.forceHit.setCooldown(v / 1000) end)
--- pulls origin+aim toward the target only enough to cap the validated range at
--- 200 studs (never onto the target) - keeps origin as near our real HRP as it can
-regToggle(Combat, "HC_FHBypassRaycast", "Bypass raycast (cap range 200)", false, function(v) hc.forceHit.setBypassRaycast(v) end)
 
 Combat:NewSection("Fake tracer")
 regToggle(Combat, "HC_FHTracer", "Show fake bullet tracer", true, function(v) hc.forceHit.setTracerEnabled(v) end)
