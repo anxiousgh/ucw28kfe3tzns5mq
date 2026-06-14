@@ -381,6 +381,11 @@ end)
 -- spot. Can't beat a clean freeze/raknet (real pos is never sent to you).
 regToggle(Desync, "OrbitTrackReal", "Track through desync (ignore teleport spikes)", false,
     function(v) hook.desync.setOrbitTrackReal(v) end)
+-- glue variant: welds you to an anchored part driven around the target instead
+-- of CFrame writes. LOCKS your local movement while on (you can't walk). Uses
+-- the same target/radius/speed/height. Don't run alongside "Enable orbit".
+regToggle(Desync, "OrbitGlue", "Glue mode (welds you - freezes local movement)", false,
+    function(v) if v then hook.glueOrbit.start() else hook.glueOrbit.stop() end end)
 regSlider(Desync, "OrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
     function(v) hook.desync.setOrbitRadius(v) end)
 regDecimal(Desync, "OrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,

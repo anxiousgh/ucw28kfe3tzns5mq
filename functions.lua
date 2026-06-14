@@ -3691,6 +3691,9 @@ F.desync = (function()
         setOrbitRadius  = function(n) _orbitRadius = math.clamp(tonumber(n) or 8, 0, 1000) end,
         setOrbitSpeed   = function(n) _orbitSpeed  = math.clamp(tonumber(n) or 4, 0, 90) end,
         setOrbitHeight  = function(n) _orbitHeight = math.clamp(tonumber(n) or 0, -1000, 1000) end,
+        getOrbitRadius  = function() return _orbitRadius end,
+        getOrbitSpeed   = function() return _orbitSpeed end,
+        getOrbitHeight  = function() return _orbitHeight end,
         stop            = stopAll,
         isRaknetAvailable = function() return findRaknet() ~= nil end,
         isActive        = function() return active end,
@@ -3750,6 +3753,77 @@ F.desync = (function()
                 if hrp then realCF = hrp.CFrame end
             end
         end,
+    }
+end)()
+
+--  GLUE ORBIT: drive the server position with a Weld to an anchored part
+--  instead of CFrame writes. The HRP is welded to an invisible anchored part;
+--  each Heartbeat the anchor moves to the orbit point (the welded HRP follows ->
+--  replicates there), each RenderStep it moves back to your start spot (you see
+--  yourself put). Because the HRP is welded to an anchored part, your local
+--  movement is LOCKED while this runs - it's a "stand still, server-hitbox
+--  orbits the target" tool. Reuses the desync orbit's target/radius/speed/height.
+F.glueOrbit = (function()
+    local active = false
+    local anchor, weld, hb, startCF, angle
+    local RESTORE = "_F_GLUEORBIT_RESTORE"
+
+    local function teardown()
+        active = false
+        if hb then hb:Disconnect(); hb = nil end
+        pcall(function() RunService:UnbindFromRenderStep(RESTORE) end)
+        if weld then pcall(function() weld:Destroy() end); weld = nil end
+        if anchor then pcall(function() anchor:Destroy() end); anchor = nil end
+        local c = lplr.Character
+        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+        if hrp and startCF then pcall(function() hrp.CFrame = startCF end) end
+        startCF = nil
+        getgenv()._F_DESYNC_SENT_CF = nil
+    end
+
+    local function start()
+        if active then return end
+        local c = lplr.Character
+        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        active = true
+        angle = 0
+        startCF = hrp.CFrame
+        anchor = Instance.new("Part")
+        anchor.Name = "Glue"; anchor.Anchored = true; anchor.CanCollide = false
+        anchor.CanQuery = false; anchor.CastShadow = false; anchor.Transparency = 1
+        anchor.Size = Vector3.new(1, 1, 1); anchor.CFrame = startCF
+        anchor.Parent = workspace
+        weld = Instance.new("Weld")
+        weld.Part0 = anchor; weld.Part1 = hrp; weld.C0 = CFrame.new(); weld.Parent = anchor
+
+        hb = RunService.Heartbeat:Connect(function()
+            if not active or not anchor then return end
+            local name = F.desync.getOrbitTarget and F.desync.getOrbitTarget()
+            local tgt  = name and game:GetService("Players"):FindFirstChild(name)
+            local thrp = tgt and tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+            if not thrp then return end
+            local r   = (F.desync.getOrbitRadius and F.desync.getOrbitRadius()) or 8
+            local sp  = (F.desync.getOrbitSpeed  and F.desync.getOrbitSpeed())  or 4
+            local hgt = (F.desync.getOrbitHeight and F.desync.getOrbitHeight()) or 0
+            angle = (angle + sp) % 360
+            local a = math.rad(angle)
+            local off = Vector3.new(math.cos(a) * r, hgt, math.sin(a) * r)
+            -- anchor (and the welded HRP) -> orbit point; this is what replicates
+            anchor.CFrame = CFrame.new(thrp.Position + off) * (startCF - startCF.Position)
+            getgenv()._F_DESYNC_SENT_CF = anchor.CFrame
+        end)
+        RunService:BindToRenderStep(RESTORE, Enum.RenderPriority.First.Value, function()
+            if not active or not anchor then return end
+            -- pull the anchor (+ welded HRP) back to our real spot for the camera
+            if startCF then anchor.CFrame = startCF end
+        end)
+    end
+
+    return {
+        start    = start,
+        stop     = teardown,
+        isActive = function() return active end,
     }
 end)()
 
