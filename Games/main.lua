@@ -223,6 +223,33 @@ regToggle(Movement, "AllowJump", "Allow jump", false, function(v) if v then hook
 regToggle(Movement, "Noclip", "Noclip", false, function(v) if v then hook.noclip.start() else hook.noclip.stop() end end)
 regToggle(Movement, "ClickTp", "Click teleport", false, function(v) if v then hook.clickTp.start() else hook.clickTp.stop() end end)
 
+-- ---------- Fakepos orbit ----------
+-- Orbits the player chosen in the Players tab using the connection-glue method.
+-- Physical mode glues our character around them; "Desync position" spoofs our
+-- position to the orbit point while we stay put locally.
+Movement:NewSection("Fakepos orbit")
+Movement:NewLabel("Orbits the player selected in the Players tab.", "left")
+regToggle(Movement, "FakeOrbit", "Fakepos orbit", false, function(v)
+    if v then
+        if not hook.fakeOrbit.getTarget() then
+            notify("Select a player in the Players tab first", 3, "alert")
+        end
+        hook.fakeOrbit.start()
+    else
+        hook.fakeOrbit.stop()
+    end
+end)
+regToggle(Movement, "FakeOrbitDesync", "Desync position (spoof instead of moving)", false,
+    function(v) hook.fakeOrbit.setDesync(v) end)
+regToggle(Movement, "FakeOrbitFace", "Always face target", true,
+    function(v) hook.fakeOrbit.setFace(v) end)
+regSlider(Movement, "FakeOrbitRadius", "Orbit radius", " studs", { min = 0, max = 100, default = 8 },
+    function(v) hook.fakeOrbit.setRadius(v) end)
+regSlider(Movement, "FakeOrbitSpeed", "Orbit speed", " deg/s", { min = 0, max = 1080, default = 180 },
+    function(v) hook.fakeOrbit.setSpeed(v) end)
+regSlider(Movement, "FakeOrbitHeight", "Orbit height", " studs", { min = -50, max = 50, default = 0 },
+    function(v) hook.fakeOrbit.setHeight(v) end)
+
 -- ---------- CSGO HVH movement ----------
 Movement:NewSection("CSGO HVH movement")
 regToggle(Movement, "HVH", "HVH enabled", false, function(v) if v then hook.hvhMovement.start() else hook.hvhMovement.stop() end end)
@@ -366,10 +393,10 @@ regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, 
     function(v) hook.fakeLag.setAmount(v) end)
 Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
 
--- ---- fakepos resolver (toggleable desync) ----
--- Verbatim port of the connection-glue method: Target key locks the player
--- closest to your mouse, then the toggle re-parents our physics-rep root onto
--- them (PhysicsRepRootPart) + grabs network ownership, gluing us onto their real
+-- ---- fakepos resolver ----
+-- Connection-glue method: Target key locks the player closest to your mouse,
+-- then the toggle re-parents our physics-rep root onto them (PhysicsRepRootPart)
+-- + grabs network ownership, putting our physical character onto their real
 -- spot. Rainbow tracer to the target.
 Desync:NewSection("Fakepos resolver")
 do
@@ -432,7 +459,7 @@ do
         if s.target then s.target = nil; notify("Target cleared", 2, "information")
         else s.target = closest(); if s.target then notify("Target: " .. s.target.Name, 2, "success") else notify("No target near cursor", 2, "alert") end end
     end)
-    regToggle(Desync, "FakeposResolver", "Fakepos resolver (desync)", false, function(v) s.attached = v end)
+    regToggle(Desync, "FakeposResolver", "Fakepos resolver", false, function(v) s.attached = v end)
     regToggle(Desync, "FakeposTracer", "Tracer", true, function(v) s.tracer.enabled = v end)
     regDropdown(Desync, "FakeposTracerMode", "Tracer origin", "Mouse", { "Mouse", "Bottom", "HRP" }, false, function(v) s.tracer.mode = v end)
 
@@ -518,7 +545,12 @@ local function playerNameList()
     return names
 end
 local plrSel = nil
-local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false, function(v) plrSel = v end)
+-- keep the fakepos orbit pointed at whoever's currently selected here
+local function pushOrbitTarget(v)
+    if hook.fakeOrbit then hook.fakeOrbit.setTarget(labelToPlayer[v]) end
+end
+local plrDrop = PlayersTab:NewDropdown("Player", "(none)", playerNameList(), false,
+    function(v) plrSel = v; pushOrbitTarget(v) end)
 
 -- rebuild the option list but keep the current pick selected if they're still
 -- here (SetOptions clears the selection, which was un-choosing players on every

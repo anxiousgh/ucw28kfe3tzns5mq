@@ -835,49 +835,136 @@ local function viewPlayer(plr)
     _viewConn=plr.CharacterAdded:Connect(function() task.wait(0.1); applySubject() end)
 end
 
--- spin-desync fling
+-- connection-glue fling: teleport behind the target, always facing them.
+-- Same method as the fakepos resolver -- grab network ownership of both roots
+-- and re-parent our physics-rep root onto theirs (PhysicsRepRootPart), then
+-- snap our CFrame to 3 studs behind them, looking at them, for the duration.
 local function flingPlayer(plr)
     if typeof(plr)=="string" then plr=findPlayerByName(plr) end
     if not plr then return end
     local target=plr
     local char=lplr.Character; if not char then return end
     local lhrp=char:FindFirstChild("HumanoidRootPart"); if not lhrp then return end
-    local savedCF=lhrp.CFrame
     task.spawn(function()
-        local _angle=0; local _savedVel
-        local _hbConn,_rsConn
+        local _hbConn
         _hbConn=RunService.Heartbeat:Connect(function()
             local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
             local tc=target.Character; local th=tc and tc:FindFirstChild("HumanoidRootPart")
             if not h or not th then return end
-            _savedVel=h.AssemblyLinearVelocity; _angle=(_angle+120)%360
-            -- snap onto the target's LIVE position + spin hard; THIS replicates
-            h.CFrame=th.CFrame*CFrame.new(0,0,0.5)*CFrame.Angles(math.rad(_angle),math.rad(_angle*2),math.rad(_angle*0.5))
-            h.AssemblyLinearVelocity=Vector3.new(1,1,1)*16384
+            pcall(function() h:SetNetworkOwner(lplr) end)
+            pcall(function() th:SetNetworkOwner(lplr) end)
+            pcall(function() if sethiddenproperty then sethiddenproperty(h,"PhysicsRepRootPart",th) end end)
+            -- 3 studs behind them (+Z is their local back), facing them
+            local behind = (th.CFrame * CFrame.new(0,0,3)).Position
+            h.CFrame = CFrame.lookAt(behind, th.Position)
+            h.AssemblyLinearVelocity=Vector3.zero
+            h.AssemblyAngularVelocity=Vector3.zero
         end)
-        _rsConn=RunService.RenderStepped:Connect(function()
-            -- keep our LOCAL view put (we don't actually move; the server flings them)
-            local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
-            if h then h.CFrame=savedCF; if _savedVel then h.AssemblyLinearVelocity=_savedVel end end
-        end)
-        -- the Heartbeat connection does the work (snap+spin on the target);
-        -- just hold for the duration, bailing if either character despawns
+        -- hold the glue for the duration, bailing if either character despawns
         local deadline=tick()+2.5
         while tick()<deadline do
             if not target.Character or not lplr.Character then break end
             task.wait()
         end
         if _hbConn then _hbConn:Disconnect() end
-        if _rsConn then _rsConn:Disconnect() end
         if lplr.Character then
             local lh=lplr.Character:FindFirstChild("HumanoidRootPart")
-            if lh then
-                lh.Anchored=true; lh.AssemblyLinearVelocity=Vector3.zero; lh.CFrame=savedCF
-                task.delay(1,function() if lh and lh.Parent then lh.Anchored=false end end)
-            end
+            if lh then lh.AssemblyLinearVelocity=Vector3.zero; lh.AssemblyAngularVelocity=Vector3.zero end
         end
     end)
 end
+
+-- ---- fakepos orbit (connection-glue orbit around the selected player) ----
+-- Two modes: physical (glue our root onto an orbit point around the target,
+-- replicating relative to them) or desync (spoof our position to the orbit
+-- point while we stay put locally). Target is whoever main.lua sets.
+local fakeOrbit = (function()
+    local _on=false
+    local _target=nil
+    local _radius=8
+    local _speed=180      -- degrees / second
+    local _height=0
+    local _face=true
+    local _desync=false
+    local _angle=0
+    local _hbConn=nil
+    local _bindActive=false
+    local _savedCF=nil    -- our real local CFrame (desync mode restores to this)
+    local RESTORE="wh_fakeorbit_restore"
+
+    local function targetHrp()
+        local c=_target and _target.Character
+        return c and c:FindFirstChild("HumanoidRootPart")
+    end
+
+    local function orbitCF(thrp, hrp)
+        local rad=math.rad(_angle)
+        local pos=thrp.Position + Vector3.new(math.cos(rad)*_radius, _height, math.sin(rad)*_radius)
+        if _face then
+            return CFrame.lookAt(pos, thrp.Position)
+        end
+        return CFrame.new(pos) * (hrp.CFrame - hrp.CFrame.Position)  -- keep our current rotation
+    end
+
+    local function stop()
+        _on=false
+        if _hbConn then _hbConn:Disconnect(); _hbConn=nil end
+        if _bindActive then pcall(function() RunService:UnbindFromRenderStep(RESTORE) end); _bindActive=false end
+        getgenv()._F_DESYNC_SENT_CF=nil
+        local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
+        if h and _savedCF then pcall(function() h.CFrame=_savedCF end) end
+        _savedCF=nil
+    end
+
+    local function start()
+        if _on then return end
+        _on=true; _angle=0; _savedCF=nil
+        _hbConn=RunService.Heartbeat:Connect(function(dt)
+            if not _on then return end
+            local thrp=targetHrp()
+            local c=lplr.Character; local hrp=c and c:FindFirstChild("HumanoidRootPart")
+            if not thrp or not hrp then return end
+            _angle=(_angle + _speed*dt) % 360
+            local cf=orbitCF(thrp, hrp)
+            if _desync then
+                _savedCF = hrp.CFrame          -- where we actually are (held locally)
+                hrp.CFrame = cf                -- spoofed pose replicates to the server
+                getgenv()._F_DESYNC_SENT_CF = cf
+            else
+                pcall(function() hrp:SetNetworkOwner(lplr) end)
+                pcall(function() thrp:SetNetworkOwner(lplr) end)
+                pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
+                hrp.CFrame = cf
+                hrp.AssemblyLinearVelocity=Vector3.zero
+                hrp.AssemblyAngularVelocity=Vector3.zero
+            end
+        end)
+        -- desync mode only: restore our local view each render frame so we don't
+        -- actually move on our own screen
+        RunService:BindToRenderStep(RESTORE, Enum.RenderPriority.First.Value, function()
+            if not _on or not _desync then return end
+            local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
+            if h and _savedCF then h.CFrame=_savedCF end
+        end)
+        _bindActive=true
+    end
+
+    return {
+        start=start, stop=stop,
+        setTarget = function(p) _target = (typeof(p)=="Instance") and p or nil end,
+        getTarget = function() return _target end,
+        setRadius = function(n) _radius=math.clamp(tonumber(n) or 8, 0, 1000) end,
+        setSpeed  = function(n) _speed =math.clamp(tonumber(n) or 180, 0, 3600) end,
+        setHeight = function(n) _height=math.clamp(tonumber(n) or 0, -1000, 1000) end,
+        setFace   = function(v) _face = v and true or false end,
+        setDesync = function(v)
+            v = v and true or false
+            if _on and _desync and not v then getgenv()._F_DESYNC_SENT_CF=nil end  -- leaving desync mode
+            _desync = v
+        end,
+        isOn=function() return _on end,
+    }
+end)()
 
 --  FOLLOW PLAYER (pathfinding)
 local _PathfindingService = game:GetService("PathfindingService")
@@ -2838,6 +2925,8 @@ F.players = {
     end,
 }
 
+F.fakeOrbit = fakeOrbit
+
 --  AUTO-TARGETER
 
 -- utility helpers (exposed for advanced users)
@@ -4147,6 +4236,7 @@ F.disableAll = function()
     stopClickTp(); stopNoclip(); stopFullbright(); stopFreecam()
     stopZoom(); stopSpin(); stopFlip(); stopTilt(); stopIce()
     if F.desync     then F.desync.stop()     end
+    if F.fakeOrbit  then F.fakeOrbit.stop()  end
     if F.antiFling  then F.antiFling.stop()  end
     if F.forceChat  then (F.forceChat.fullStop or F.forceChat.stop)() end
     if F.stickyEmote then F.stickyEmote.stop() end
