@@ -3905,6 +3905,78 @@ F.glueOrbit = (function()
     }
 end)()
 
+--  FAKEPOS RESOLVER ORBIT: circle a target, grabbing network ownership of them
+--  each frame (fakepos resolver) so they resolve to their real spot. Two modes:
+--    "physical" - our real character circles them (we actually move)
+--    "desync"   - our SERVER position circles them, restored locally each frame
+F.fakeposOrbit = (function()
+    local active = false
+    local mode = "physical"
+    local targetName = nil
+    local radius, speed, height, angle = 8, 4, 0, 0
+    local hb, realCF, realVel
+    local RESTORE = "_F_FAKEORBIT_RESTORE"
+
+    local function teardown()
+        active = false
+        if hb then hb:Disconnect(); hb = nil end
+        pcall(function() RunService:UnbindFromRenderStep(RESTORE) end)
+        if realCF then
+            local c = lplr.Character; local h = c and c:FindFirstChild("HumanoidRootPart")
+            if h then pcall(function() h.CFrame = realCF end) end
+        end
+        realCF, realVel = nil, nil
+        getgenv()._F_DESYNC_SENT_CF = nil
+    end
+
+    local function start()
+        if active then return end
+        local c = lplr.Character; local h = c and c:FindFirstChild("HumanoidRootPart")
+        if not h then return end
+        active = true; angle = 0
+        hb = RunService.Heartbeat:Connect(function()
+            if not active then return end
+            local lc = lplr.Character; local lh = lc and lc:FindFirstChild("HumanoidRootPart")
+            local tgt = targetName and game:GetService("Players"):FindFirstChild(targetName)
+            local th = tgt and tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+            if not lh or not th then return end
+            -- fakepos resolver: own the target so their desync can't spoof -> real spot
+            pcall(function() th:SetNetworkOwner(lplr) end)
+            pcall(function() lh:SetNetworkOwner(lplr) end)
+            angle = (angle + speed) % 360
+            local a = math.rad(angle)
+            local pt = th.Position + Vector3.new(math.cos(a) * radius, height, math.sin(a) * radius)
+            local rot = lh.CFrame - lh.CFrame.Position
+            if mode == "desync" then
+                realCF  = lh.CFrame
+                realVel = lh.AssemblyLinearVelocity
+                lh.CFrame = CFrame.new(pt) * rot
+                getgenv()._F_DESYNC_SENT_CF = lh.CFrame
+            else
+                lh.CFrame = CFrame.new(pt) * rot
+            end
+        end)
+        RunService:BindToRenderStep(RESTORE, Enum.RenderPriority.First.Value, function()
+            if not active or mode ~= "desync" then return end
+            local lc = lplr.Character; local lh = lc and lc:FindFirstChild("HumanoidRootPart")
+            if lh and realCF then lh.CFrame = realCF; if realVel then lh.AssemblyLinearVelocity = realVel end end
+        end)
+    end
+
+    return {
+        start     = start,
+        stop      = teardown,
+        isActive  = function() return active end,
+        setMode   = function(m) mode = (m == "desync") and "desync" or "physical" end,
+        getMode   = function() return mode end,
+        setTarget = function(n) targetName = n and tostring(n) or nil; angle = 0 end,
+        getTarget = function() return targetName end,
+        setRadius = function(n) radius = math.clamp(tonumber(n) or 8, 0, 1000) end,
+        setSpeed  = function(n) speed  = math.clamp(tonumber(n) or 4, 0, 90) end,
+        setHeight = function(n) height = math.clamp(tonumber(n) or 0, -1000, 1000) end,
+    }
+end)()
+
 --  SERVER POSITION TRACKER (RakNet)
 F.serverPos = (function()
     local function findRaknet()
