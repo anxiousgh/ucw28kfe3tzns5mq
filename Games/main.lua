@@ -258,7 +258,6 @@ local desyncMin, desyncMax = 5000, 20000
 local desyncEnableT
 local updateDesyncSliders   -- defined after the sliders exist; shows only the
                             -- sliders that belong to the currently chosen mode
-local setOrbitFromSelection -- assigned after the Players-tab selection helper exists
 local MODE_START = {
     Void     = function() hook.desync.startVoid()     return true end,
     Sky      = function() hook.desync.startSky()      return true end,
@@ -367,100 +366,7 @@ regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, 
     function(v) hook.fakeLag.setAmount(v) end)
 Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
 
--- ---- orbit (its own section: an overlay, runs alongside a desync mode) ----
--- Server position circles the Players-tab selected player while you move
--- locally. Independent of the desync mode above, so you can run it together
--- with e.g. Velocity. (Not compatible with the Raknet mode - that blocks the
--- physics packet the orbit needs to send.)
-Desync:NewSection("Orbit")
--- orbit uses the CFrame desync (places you exactly each frame - stable, tight).
--- The glue/AlignPosition version overshot and flung you off, and force-based
--- following lags worse. The residual "chase" on a MOVING target is network
--- latency (you orbit their replicated, delayed position) - inherent to every
--- method. Same target/radius/speed/height + "track through desync".
-regToggle(Desync, "OrbitEnabled", "Enable orbit", false,
-    function(v) hook.desync.setOrbitEnabled(v) end)
-Desync:NewButton("Lock orbit to selected player", function()
-    if setOrbitFromSelection then setOrbitFromSelection() end
-end)
--- best-effort: reject the target's desync teleport spikes and orbit their real
--- spot. Can't beat a clean freeze/raknet (real pos is never sent to you).
-regToggle(Desync, "OrbitTrackReal", "Track through desync (ignore teleport spikes)", false,
-    function(v) hook.desync.setOrbitTrackReal(v) end)
-regSlider(Desync, "OrbitRadius", "Orbit radius", "", { min = 0, max = 200, default = 8 },
-    function(v) hook.desync.setOrbitRadius(v) end)
-regDecimal(Desync, "OrbitSpeed", "Orbit speed (deg/frame)", "", 0, 30, 4, 10,
-    function(v) hook.desync.setOrbitSpeed(v) end)
-regSlider(Desync, "OrbitHeight", "Orbit height", "", { min = -100, max = 100, default = 0 },
-    function(v) hook.desync.setOrbitHeight(v) end)
 
--- Debug/verify: drop a bright marker at our best estimate of the orbit
--- target's REAL position (same clustering the orbit uses), so you can SEE
--- whether it's locking onto where they actually are vs the desync spoof.
-do
-    local RunSvc2  = game:GetService("RunService")
-    local PlayersS = game:GetService("Players")
-    local marker, buf, last, on = nil, {}, nil, false
-    -- ignore-list of every character so the ground ray hits the MAP, not bodies
-    local function chars()
-        local t = {}
-        for _, p in ipairs(PlayersS:GetPlayers()) do if p.Character then t[#t + 1] = p.Character end end
-        return t
-    end
-    -- is `pos` standing on the map? (real players are; sky / void spoofs aren't)
-    local function grounded(pos, ignore)
-        local rp = RaycastParams.new()
-        rp.FilterType = Enum.RaycastFilterType.Exclude
-        rp.FilterDescendantsInstances = ignore
-        rp.IgnoreWater = true
-        return workspace:Raycast(pos + Vector3.new(0, 1, 0), Vector3.new(0, -12, 0), rp) ~= nil
-    end
-    local function keyOf(p) return math.floor(p.X / 4) .. "," .. math.floor(p.Y / 4) .. "," .. math.floor(p.Z / 4) end
-    local function est(hrp)
-        local raw = hrp.Position
-        buf[#buf + 1] = { p = raw, g = grounded(raw, chars()) }
-        while #buf > 40 do table.remove(buf, 1) end
-        -- the static spoof (freeze/custom) is the exact spot that repeats most
-        local freq, domKey, domN = {}, nil, 0
-        for _, e in ipairs(buf) do
-            local k = keyOf(e.p); freq[k] = (freq[k] or 0) + 1
-            if freq[k] > domN then domN, domKey = freq[k], k end
-        end
-        local excludeDom = domN >= #buf * 0.4   -- one spot is 40%+ of frames -> spoof
-        -- 1) prefer the newest GROUNDED frame that isn't the static spoof
-        for i = #buf, 1, -1 do
-            if buf[i].g and not (excludeDom and keyOf(buf[i].p) == domKey) then last = buf[i].p; return buf[i].p end
-        end
-        -- 2) nothing else grounded -> they're probably genuinely standing still
-        for i = #buf, 1, -1 do if buf[i].g then last = buf[i].p; return buf[i].p end end
-        return last or raw   -- nothing grounded at all -> can't see them (clean block)
-    end
-    local function ensureMarker()
-        if marker and marker.Parent then return marker end
-        marker = Instance.new("Part")
-        marker.Name = "_wh_realpos"; marker.Anchored = true; marker.CanCollide = false
-        marker.CanQuery = false; marker.CastShadow = false; marker.Size = Vector3.new(2, 5, 1)
-        marker.Material = Enum.Material.Neon; marker.Color = Color3.fromRGB(255, 40, 40)
-        marker.Transparency = 0.3; marker.Parent = workspace
-        return marker
-    end
-    local function removeMarker()
-        if marker then pcall(function() marker:Destroy() end); marker = nil end
-        buf = {}; last = nil
-    end
-    regToggle(Desync, "OrbitRealMarker", "Show real-pos marker (debug)", false, function(v)
-        on = v; if not v then removeMarker() end
-    end)
-    RunSvc2.RenderStepped:Connect(function()
-        if not on or library.Unloaded then if library.Unloaded then removeMarker() end return end
-        local name = hook.desync.getOrbitTarget and hook.desync.getOrbitTarget()
-        local p    = name and PlayersS:FindFirstChild(name)
-        local ch   = p and p.Character
-        local hrp  = ch and ch:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        ensureMarker().CFrame = CFrame.new(est(hrp))
-    end)
-end
 
 -- ---- Desync resolver: locally snap desyncing players back to their real spot
 -- so their desync stops fooling you (and your ESP/aim). Works on LEAKY desyncs
@@ -604,16 +510,6 @@ local function selectedPlayer()
     end
     if not p then notify("Player not found: " .. tostring(plrSel), 2, "error") end
     return p
-end
-
--- wired into the Desync tab's "Lock orbit to selected player" button (declared
--- earlier; assigned here now that selectedPlayer exists)
-setOrbitFromSelection = function()
-    local p = selectedPlayer()
-    if p then
-        hook.desync.setOrbitTarget(p.Name)
-        notify("Orbit target: " .. dispName(p), 2, "success")
-    end
 end
 
 PlayersTab:NewButton("Follow", function() local p = selectedPlayer(); if p then hook.players.follow(p) end end)
