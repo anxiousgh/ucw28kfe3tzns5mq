@@ -831,14 +831,11 @@ local function gotoPlayer(plr)
     local hrp=lc and lc:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     if _fakeposResolver then
-        -- fakepos resolver: connection-glue onto them (PhysicsRepRootPart) so we
-        -- land on their RESOLVED real spot, defeating their desync; release shortly
-        _glueTo(hrp, tHrp)
-        pcall(function() hrp.CFrame = tHrp.CFrame + Vector3.new(3, 0, 0) end)
-        task.delay(0.25, function()
-            local c = lplr.Character; local h = c and c:FindFirstChild("HumanoidRootPart")
-            if h then _unglue(h) end
-        end)
+        -- fakepos resolver: grab network ownership of the target (and us) so their
+        -- desync can't spoof their position anymore -> they resolve to their real
+        -- spot. NO glue / no PhysicsRepRootPart, and we don't move at all.
+        pcall(function() tHrp:SetNetworkOwner(lplr) end)
+        pcall(function() hrp:SetNetworkOwner(lplr) end)
     else
         _uprightTp(lc, hrp, _predictCF(tHrp).Position + Vector3.new(3, 0, 0), tHrp.CFrame.LookVector)
     end

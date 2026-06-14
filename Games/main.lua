@@ -367,11 +367,11 @@ regSlider(Desync, "FakeLagAmount", "Lag amount", " ms", { min = 20, max = 1000, 
 Desync:NewLabel("Delays your movement, not blocks it. Higher = further in the past.", "left")
 
 -- ---- fakepos resolver ----
--- When on, Goto (Players tab + HC tab) uses the connection-glue
--- (PhysicsRepRootPart) to land on the target's RESOLVED real position instead of
--- their fake/desynced replicated spot.
+-- When on, Goto (Players tab + HC tab) grabs network ownership of the target so
+-- their desync can't spoof their position - they resolve to their real spot. No
+-- glue, and your character doesn't move.
 Desync:NewSection("Fakepos resolver")
-regToggle(Desync, "FakeposResolver", "Fakepos resolver (goto real pos)", false,
+regToggle(Desync, "FakeposResolver", "Fakepos resolver", false,
     function(v) hook.players.setFakeposResolver(v) end)
 
 -- (regColor / regDecimal are defined at top level and exposed via ctx.api)
