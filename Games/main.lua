@@ -556,6 +556,11 @@ PlayersTab:NewButton("Fling", function() local p = selectedPlayer(); if p then h
             notify("No emote playing on " .. (p and p.Name or "?"), 2, "alert")
         end
     end)
+-- Goto/Fling read a target's LAGGED position; predict forward by their velocity
+-- * ping so you land where they ACTUALLY are. 100% = full measured ping; raise
+-- if it still trails a moving target, lower if it overshoots ahead of them.
+regSlider(PlayersTab, "PlayerPredict", "Target prediction (x ping)", "%", { min = 0, max = 300, default = 100 },
+    function(v) hook.players.setPredict(v / 100) end)
 
 -- ============================================================
 --  VISUALS

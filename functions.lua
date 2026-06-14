@@ -778,13 +778,31 @@ local function findPlayerByName(target)
     return nil
 end
 
+-- Latency prediction: the position you read off another player's HRP is where
+-- they were ~1 ping ago (the update had to travel their client -> server ->
+-- you). Extrapolate forward by their velocity * that delay so you land on where
+-- they ACTUALLY are right now, instead of chasing where they were.
+local _Stats = game:GetService("Stats")
+local _predictMult = 1.0   -- multiplier on the measured ping (user-tunable)
+local function _predictSeconds()
+    local ok, ping = pcall(function() return _Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+    local s = (ok and tonumber(ping) or 100) / 1000
+    return s * _predictMult
+end
+-- returns the target HRP's CFrame shifted forward by the predicted travel
+local function _predictCF(ehrp)
+    local lead = _predictSeconds()
+    if lead <= 0 then return ehrp.CFrame end
+    return ehrp.CFrame + ehrp.AssemblyLinearVelocity * lead
+end
+
 local function gotoPlayer(plr)
     if typeof(plr)=="string" then plr=findPlayerByName(plr) end
     if not plr then return end
     local tHrp=plr.Character and plr.Character:FindFirstChild("HumanoidRootPart"); if not tHrp then return end
     local lc=lplr.Character
     local hrp=lc and lc:FindFirstChild("HumanoidRootPart")
-    if hrp then _uprightTp(lc, hrp, tHrp.Position + Vector3.new(3, 0, 0), tHrp.CFrame.LookVector) end
+    if hrp then _uprightTp(lc, hrp, _predictCF(tHrp).Position + Vector3.new(3, 0, 0), tHrp.CFrame.LookVector) end
 end
 
 local _viewPrevSubject, _viewPrevType, _viewConn = nil, nil, nil
@@ -840,7 +858,9 @@ local function flingPlayer(plr)
             local ehrp=echar:FindFirstChild("HumanoidRootPart"); if not ehrp then break end
             if not lplr.Character then break end
             local lh=lplr.Character:FindFirstChild("HumanoidRootPart"); if not lh then break end
-            lh.CFrame=ehrp.CFrame*CFrame.new(0,0,0.5); task.wait(0.016)
+            -- predict where they actually are now (not the lagged read) so the
+            -- fling lands on them while they're moving instead of chasing
+            lh.CFrame=_predictCF(ehrp)*CFrame.new(0,0,0.5); task.wait(0.016)
         end
         if _hbConn then _hbConn:Disconnect() end
         if _rsConn then _rsConn:Disconnect() end
@@ -2796,6 +2816,9 @@ F.players = {
     isFollowing = function() return _follow.target end,
     setFollowVisualize = followSetVisualize,
     getFollowVisualize = function() return _follow.viz end,
+    -- prediction multiplier on the measured ping (0 = read raw lagged position)
+    setPredict = function(n) _predictMult = math.clamp(tonumber(n) or 1, 0, 5) end,
+    getPredict = function() return _predictMult end,
 }
 
 --  AUTO-TARGETER
