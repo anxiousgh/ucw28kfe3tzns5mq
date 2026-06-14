@@ -1403,14 +1403,6 @@ hook.games.hoodCustoms.forceHit = (function()
     local _lastTracerAt   = 0
     local MIN_TRACER_GAP  = 0.05
 
-    -- bypass v2: DON'T move the origin (field 3) - that's what tripped "origin
-    -- mismatch". The payload has TWO position fields: origin (checked against
-    -- our real HRP) and aim (field 4). Keep origin real and move only AIM onto
-    -- the target, betting HC's range/LoS raycast keys off aim while the mismatch
-    -- check keys off origin. Normal stays the position (the reference does that
-    -- and the server accepts it) and the damage path is untouched.
-    local bypassRaycast = false
-
     local lastFire = 0
 
     local _RS = game:GetService("ReplicatedStorage")
@@ -1770,16 +1762,7 @@ hook.games.hoodCustoms.forceHit = (function()
             hits[i]    = { Normal = hitPos, Instance = part, Position = hitPos }
             targets[i] = { thePart = part, theOffset = Vector3.zero }
         end
-        -- origin (field 3) stays our real HRP so the mismatch check passes.
-        -- bypass moves only AIM (field 4) to a point 3 studs off the target so a
-        -- range/LoS raycast that keys off aim is short, wall-free and in range.
-        local origin = root.Position
-        local aim    = origin
-        if bypassRaycast then
-            local toMe = root.Position - hitPos
-            aim = (toMe.Magnitude > 0.1) and (hitPos + toMe.Unit * 3) or hitPos
-        end
-        local payload = { hits, targets, origin, aim, workspace:GetServerTimeNow() }
+        local payload = { hits, targets, root.Position, root.Position, workspace:GetServerTimeNow() }
         return pcall(function() me:FireServer("Shoot", payload) end)
     end
     -- Legacy single-shot wrapper kept for non-shotgun call sites
@@ -2220,8 +2203,6 @@ hook.games.hoodCustoms.forceHit = (function()
     t.setHitPart    = function(name) hitPartName = name or "Head" end
     t.getHitPart    = function() return hitPartName end
     t.setCooldown   = function(n) cooldown = math.max(0, tonumber(n) or 0.2) end
-    t.setBypassRaycast = function(v) bypassRaycast = v == true end
-    t.getBypassRaycast = function() return bypassRaycast end
     -- setShotgunMode / getShotgunMode removed - there's only one path now
     -- (synth, the canonical-payload direct FireServer). Kept as no-op
     -- stubs so the loader doesn't crash if it still tries to call them.
@@ -2973,9 +2954,6 @@ regToggle(Combat, "HC_ForceHit", "Force Hit (needs Auto Shoot)", false, function
 end)
 regDropdown(Combat, "HC_ForceHitPart", "Hit part", "Head", { "Head", "UpperTorso", "HumanoidRootPart" }, false, function(v) hc.forceHit.setHitPart(v) end)
 regSlider(Combat, "HC_ForceHitCooldown", "Cooldown", " ms", { min = 0, max = 1000, default = 200 }, function(v) hc.forceHit.setCooldown(v / 1000) end)
--- sends the shot origin next to the target so the server's wall/range raycast
--- passes (fixes the "wallbang" error on out-of-range / through-wall hits)
-regToggle(Combat, "HC_FHBypassRaycast", "Bypass raycast (wallbang / any range)", false, function(v) hc.forceHit.setBypassRaycast(v) end)
 
 Combat:NewSection("Fake tracer")
 regToggle(Combat, "HC_FHTracer", "Show fake bullet tracer", true, function(v) hc.forceHit.setTracerEnabled(v) end)
