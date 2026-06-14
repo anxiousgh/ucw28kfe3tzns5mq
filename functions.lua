@@ -3694,6 +3694,9 @@ F.desync = (function()
         getOrbitRadius  = function() return _orbitRadius end,
         getOrbitSpeed   = function() return _orbitSpeed end,
         getOrbitHeight  = function() return _orbitHeight end,
+        -- target position with the "track through desync" estimate applied;
+        -- shared so the glue orbit honours the same toggle
+        getOrbitTargetPos = function(thrp) return orbitTargetPos(thrp) end,
         stop            = stopAll,
         isRaknetAvailable = function() return findRaknet() ~= nil end,
         isActive        = function() return active end,
@@ -3809,8 +3812,10 @@ F.glueOrbit = (function()
             angle = (angle + sp) % 360
             local a = math.rad(angle)
             local off = Vector3.new(math.cos(a) * r, hgt, math.sin(a) * r)
+            -- target position (honours "track through desync")
+            local tpos = (F.desync.getOrbitTargetPos and F.desync.getOrbitTargetPos(thrp)) or thrp.Position
             -- anchor (and the welded HRP) -> orbit point; this is what replicates
-            anchor.CFrame = CFrame.new(thrp.Position + off) * (startCF - startCF.Position)
+            anchor.CFrame = CFrame.new(tpos + off) * (startCF - startCF.Position)
             getgenv()._F_DESYNC_SENT_CF = anchor.CFrame
         end)
         RunService:BindToRenderStep(RESTORE, Enum.RenderPriority.First.Value, function()
