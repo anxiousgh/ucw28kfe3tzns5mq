@@ -935,11 +935,19 @@ local fakeOrbit = (function()
             _angle=(_angle + _speed*dt) % 360
             local cf=orbitCF(thrp, hrp)
             if _desync then
-                -- pure spoof: NO physics-rep glue here -- the glue physically drags
-                -- our character toward the target, which corrupts the real pose we
-                -- save (and would dump us on the target when we turn off). Just
-                -- record our real pose, replicate the orbit pose, restore locally.
-                _savedCF = hrp.CFrame
+                -- connection-glue + spoof. We CAN'T read our real pose from
+                -- hrp.CFrame -- the glue drags it toward the target, so saving it
+                -- would dump us on the target at turn-off. Instead track our real
+                -- on-screen pose by integrating our OWN movement input, which the
+                -- glue can't touch. That's what we restore to each render + on stop.
+                if not _savedCF then _savedCF = hrp.CFrame end
+                local hum = c:FindFirstChildOfClass("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 then
+                    _savedCF = _savedCF + hum.MoveDirection * hum.WalkSpeed * dt
+                end
+                pcall(function() hrp:SetNetworkOwner(lplr) end)
+                pcall(function() thrp:SetNetworkOwner(lplr) end)
+                pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
                 hrp.CFrame = cf
                 getgenv()._F_DESYNC_SENT_CF = cf
             else
