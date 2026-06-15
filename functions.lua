@@ -934,19 +934,19 @@ local fakeOrbit = (function()
             if not thrp or not hrp then return end
             _angle=(_angle + _speed*dt) % 360
             local cf=orbitCF(thrp, hrp)
-            -- always the connection-glue method (network ownership + re-parent our
-            -- physics-rep root onto the target so the orbit pose replicates)
-            pcall(function() hrp:SetNetworkOwner(lplr) end)
-            pcall(function() thrp:SetNetworkOwner(lplr) end)
-            pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
             if _desync then
-                -- spoof only: remember our real pose (restored each render frame)
-                -- and DON'T touch velocity, so we can still walk around locally
+                -- pure spoof: NO physics-rep glue here -- the glue physically drags
+                -- our character toward the target, which corrupts the real pose we
+                -- save (and would dump us on the target when we turn off). Just
+                -- record our real pose, replicate the orbit pose, restore locally.
                 _savedCF = hrp.CFrame
                 hrp.CFrame = cf
                 getgenv()._F_DESYNC_SENT_CF = cf
             else
-                -- physical: pin us onto the orbit point and kill drift
+                -- physical: connection-glue onto the orbit point and kill drift
+                pcall(function() hrp:SetNetworkOwner(lplr) end)
+                pcall(function() thrp:SetNetworkOwner(lplr) end)
+                pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
                 hrp.CFrame = cf
                 hrp.AssemblyLinearVelocity=Vector3.zero
                 hrp.AssemblyAngularVelocity=Vector3.zero
