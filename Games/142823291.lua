@@ -733,10 +733,14 @@ local function myRoot2()
     return ch and ch:FindFirstChild("HumanoidRootPart")
 end
 
--- swing once, then register a hit on every living player (optionally in range)
-local function knifeKillAll(range)
+-- swing once, then register a hit on every living player (optionally in range).
+-- `silent` skips the "no knife" notify (used by the aura loop so it doesn't spam).
+local function knifeKillAll(range, silent)
     local stab, touch = knifeEvents()
-    if not (stab and touch) then notify("You're not holding the [Knife]", 3, "alert"); return end
+    if not (stab and touch) then
+        if not silent then notify("You're not holding the [Knife]", 3, "alert") end
+        return
+    end
     local root = myRoot2()
     pcall(function() stab:FireServer() end)
     for _, p in ipairs(Players2:GetPlayers()) do
@@ -755,7 +759,7 @@ regToggle(Main, "MM2_KnifeAura", "Knife aura (auto)", false, function(v) knifeAu
 regSlider(Main, "MM2_KnifeAuraRange", "Aura range", "", { min = 5, max = 200, default = 30 }, function(v) knifeAuraRange = v end)
 task.spawn(function()
     while not library.Unloaded do
-        if knifeAuraOn then knifeKillAll(knifeAuraRange) end
+        if knifeAuraOn then knifeKillAll(knifeAuraRange, true) end
         task.wait(0.3)
     end
 end)
