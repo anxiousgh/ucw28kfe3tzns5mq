@@ -924,18 +924,23 @@ local fakeOrbit = (function()
             if desyncWas and back then pcall(function() h.CFrame=back end) end
         end
         _savedCF=nil
-        -- The server still thinks we're at the orbit point. Just setting our CFrame
-        -- barely replicates while we're standing still (only moving replicates the
-        -- forced position, which is why it "only worked when moving"). Briefly
-        -- ANCHOR us on our real body -- an anchored part replicates its CFrame
-        -- authoritatively, so the server accepts it whether we move or not.
-        if desyncWas and back then
+        -- Briefly ANCHOR on stop so we neither snap back to the target (desync) nor
+        -- get flung by the released glue/velocity (physical). Anchored CFrame
+        -- replicates authoritatively, so it sticks whether we're moving or still --
+        -- same idea as the fling's anchor-then-restore cleanup.
+        --   desync  -> anchor on our real body
+        --   physical-> anchor where we currently are (don't teleport onto the player)
+        local restoreCF
+        if desyncWas and back then restoreCF = back
+        elseif h then restoreCF = h.CFrame end
+        if restoreCF then
             task.spawn(function()
                 local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
                 if not hh then return end
                 pcall(function()
-                    hh.CFrame=back
+                    hh.CFrame=restoreCF
                     hh.AssemblyLinearVelocity=Vector3.zero
+                    hh.AssemblyAngularVelocity=Vector3.zero
                     hh.Anchored=true
                 end)
                 local deadline=tick()+0.3
