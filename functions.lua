@@ -925,7 +925,7 @@ local fakeOrbit = (function()
         -- server's stale orbit position / any residual fling.
         if back then
             task.spawn(function()
-                local deadline=tick()+0.5
+                local deadline=tick()+1.0
                 while tick()<deadline do
                     if _on then break end   -- re-enabled mid-restore: stop early
                     local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
