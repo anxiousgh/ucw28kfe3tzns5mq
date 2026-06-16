@@ -911,44 +911,31 @@ local fakeOrbit = (function()
         if _hbConn then _hbConn:Disconnect(); _hbConn=nil end
         if _bindActive then pcall(function() RunService:UnbindFromRenderStep(RESTORE) end); _bindActive=false end
         getgenv()._F_DESYNC_SENT_CF=nil
-        local desyncWas = _desync
         local back = _savedCF
+        _savedCF=nil
         local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
         if h then
             -- un-glue: point our physics-rep root back at ourselves so the server
             -- stops dragging us onto the target
             pcall(function() if sethiddenproperty then sethiddenproperty(h,"PhysicsRepRootPart",h) end end)
             pcall(function() h:SetNetworkOwner(lplr) end)
-            -- desync mode: drop back onto our real position. physical mode: leave
-            -- us where we are (don't teleport onto the player).
-            if desyncWas and back then pcall(function() h.CFrame=back end) end
         end
-        _savedCF=nil
-        -- Briefly ANCHOR on stop so we neither snap back to the target (desync) nor
-        -- get flung by the released glue/velocity (physical). Anchored CFrame
-        -- replicates authoritatively, so it sticks whether we're moving or still --
-        -- same idea as the fling's anchor-then-restore cleanup.
-        --   desync  -> anchor on our real body
-        --   physical-> anchor where we currently are (don't teleport onto the player)
-        local restoreCF
-        if desyncWas and back then restoreCF = back
-        elseif h then restoreCF = h.CFrame end
-        if restoreCF then
+        -- No anchor: just zero our velocity and tp us back to our home pose, both
+        -- desynced and physical. Re-assert for a short window so it sticks past the
+        -- server's stale orbit position / any residual fling.
+        if back then
             task.spawn(function()
-                local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
-                if not hh then return end
-                pcall(function()
-                    hh.CFrame=restoreCF
-                    hh.AssemblyLinearVelocity=Vector3.zero
-                    hh.AssemblyAngularVelocity=Vector3.zero
-                    hh.Anchored=true
-                end)
-                local deadline=tick()+0.3
+                local deadline=tick()+0.5
                 while tick()<deadline do
-                    if _on then break end   -- re-enabled mid-hold: stop early
+                    if _on then break end   -- re-enabled mid-restore: stop early
+                    local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
+                    if hh then
+                        hh.AssemblyLinearVelocity=Vector3.zero
+                        hh.AssemblyAngularVelocity=Vector3.zero
+                        hh.CFrame=back
+                    end
                     RunService.Heartbeat:Wait()
                 end
-                if hh and hh.Parent then pcall(function() hh.Anchored=false end) end
             end)
         end
     end
@@ -963,13 +950,11 @@ local fakeOrbit = (function()
             if not thrp or not hrp then return end
             _angle=(_angle + _speed*dt) % 360
             local cf=orbitCF(thrp, hrp)
+            -- our "home" pose that stop() tps us back to. Captured once at the real
+            -- body (before the glue drags hrp toward the target). In desync we also
+            -- integrate our movement input so it follows where we walk on screen.
+            if not _savedCF then _savedCF = hrp.CFrame end
             if _desync then
-                -- connection-glue + spoof. We CAN'T read our real pose from
-                -- hrp.CFrame -- the glue drags it toward the target, so saving it
-                -- would dump us on the target at turn-off. Instead track our real
-                -- on-screen pose by integrating our OWN movement input, which the
-                -- glue can't touch. That's what we restore to each render + on stop.
-                if not _savedCF then _savedCF = hrp.CFrame end
                 local hum = c:FindFirstChildOfClass("Humanoid")
                 if hum and hum.MoveDirection.Magnitude > 0 then
                     _savedCF = _savedCF + hum.MoveDirection * hum.WalkSpeed * dt
