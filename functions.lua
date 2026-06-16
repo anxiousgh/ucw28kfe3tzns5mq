@@ -911,6 +911,8 @@ local fakeOrbit = (function()
         if _hbConn then _hbConn:Disconnect(); _hbConn=nil end
         if _bindActive then pcall(function() RunService:UnbindFromRenderStep(RESTORE) end); _bindActive=false end
         getgenv()._F_DESYNC_SENT_CF=nil
+        local desyncWas = _desync
+        local back = _savedCF
         local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
         if h then
             -- un-glue: point our physics-rep root back at ourselves so the server
@@ -919,9 +921,24 @@ local fakeOrbit = (function()
             pcall(function() h:SetNetworkOwner(lplr) end)
             -- desync mode: drop back onto our real position. physical mode: leave
             -- us where we are (don't teleport onto the player).
-            if _desync and _savedCF then pcall(function() h.CFrame=_savedCF end) end
+            if desyncWas and back then pcall(function() h.CFrame=back end) end
         end
         _savedCF=nil
+        -- The server still thinks we're at the orbit point (that's what we were
+        -- replicating). Once the render-restore stops, it would snap us back onto
+        -- the target. Hold us on our real body for a moment so the true position
+        -- replicates and wins.
+        if desyncWas and back then
+            task.spawn(function()
+                local deadline=tick()+0.4
+                while tick()<deadline do
+                    if _on then break end   -- re-enabled mid-hold: bail
+                    local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
+                    if hh then hh.CFrame=back; hh.AssemblyLinearVelocity=Vector3.zero end
+                    RunService.Heartbeat:Wait()
+                end
+            end)
+        end
     end
 
     local function start()
