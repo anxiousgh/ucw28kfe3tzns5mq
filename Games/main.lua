@@ -969,6 +969,10 @@ do
         -- its history too, so the override lags by the same ping lookback as the
         -- real position instead of snapping to your live local spot.
         local desyncCF = hook.desync and hook.desync.getServerCFrame and hook.desync.getServerCFrame()
+        -- the fakepos orbit drives its server position live (we set it ourselves
+        -- every frame), so show the LIVE spoof point instead of a ping-lagged
+        -- estimate -- otherwise the marker trails behind the fast-moving orbit.
+        local orbitLive = hook.fakeOrbit and hook.fakeOrbit.isDesyncActive and hook.fakeOrbit.isDesyncActive()
         if desyncCF then
             desyncHist[#desyncHist + 1] = { t = now, cf = desyncCF }
             while desyncHist[1] and now - desyncHist[1].t > 3 do table.remove(desyncHist, 1) end
@@ -982,9 +986,10 @@ do
                 if desyncCF then
                     -- override: delayed spoofed root + delayed body offsets, so the
                     -- clone sits at the SERVER position (ping-lagged) with the spoof
-                    -- applied - not pinned to your live local root.
-                    local sRoot = sampleAt(now - lookback, desyncHist) or desyncCF
-                    if a then
+                    -- applied - not pinned to your live local root. The orbit is the
+                    -- exception: it's shown live (no lookback) so it keeps up.
+                    local sRoot = (orbitLive and desyncCF) or sampleAt(now - lookback, desyncHist) or desyncCF
+                    if a and not orbitLive then
                         local rRoot = (a.root and b.root) and a.root:Lerp(b.root, f) or a.root or realRoot
                         local rRootInv = rRoot:Inverse()
                         for i, p in ipairs(cloneParts) do
@@ -1013,7 +1018,7 @@ do
                 end
             end)
         else
-            local cf = (desyncCF and (sampleAt(now - lookback, desyncHist) or desyncCF))
+            local cf = (desyncCF and ((orbitLive and desyncCF) or sampleAt(now - lookback, desyncHist) or desyncCF))
                 or sampleAt(now - lookback) or realRoot
             pcall(function() clone:PivotTo(cf) end)   -- fallback marker
         end

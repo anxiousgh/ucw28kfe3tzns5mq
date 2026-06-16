@@ -5,7 +5,7 @@
 
 
 --  VERSION  (bumped on every push so you can verify which build
-local SCRIPT_VERSION = "v1.40.0"
+local SCRIPT_VERSION = "v1.41.0"
 
 --// services
 local HttpService         = game:GetService("HttpService")
@@ -889,24 +889,29 @@ local fakeOrbit = (function()
     local _angle=0
     local _hbConn=nil
     local _bindActive=false
-    local _savedCF=nil    -- our real local CFrame (desync mode restores to this)
+    local _savedCF=nil    -- our real local CFrame (restored every render frame)
+    local _savedLV=nil    -- our real local linear velocity (restored too)
+    local _savedAV=nil    -- our real local angular velocity (restored too)
     local RESTORE="wh_fakeorbit_restore"
-    -- randomize-Y: re-roll a new orbit height (within [min,max]) on every full
-    -- lap so you bob up and down unpredictably instead of holding a fixed height.
+    -- randomize-Y: pick a new random target height frequently and EASE toward it
+    -- (smooth bob), instead of snapping to a fixed height.
     local _randY=false
     local _randYMin=-5
     local _randYMax=10
-    local _curRandHeight=0   -- this lap's chosen height (rolled on each wrap)
-    -- keep-awake: a tiny ANGULAR velocity applied while you stand still so the
-    -- engine doesn't put your assembly to sleep. A sleeping body stops
-    -- replicating, which is why the desync orbit "only moved when you walked".
-    -- Angular (not linear) so it can never fling whoever you're orbiting.
-    local KEEP_AWAKE_AV = Vector3.new(0, 10, 0)
-    local function rollRandHeight()
+    local _randYInterval=0.3   -- seconds between new random targets (frequent)
+    local _randYTimer=0
+    local _randYCur=0          -- smoothed height actually used this frame
+    local _randYTarget=0       -- height we're easing toward
+    -- keep-awake: a tiny velocity applied while you stand still so the engine
+    -- doesn't put your assembly to sleep. A sleeping body stops replicating,
+    -- which is why the desync orbit "only moved when you walked". Cancelled
+    -- locally every render frame so it never affects your own movement.
+    local KEEP_AWAKE_LV = Vector3.new(0, 50, 0)
+    local function rollRandTarget()
         local lo, hi = math.min(_randYMin, _randYMax), math.max(_randYMin, _randYMax)
-        _curRandHeight = lo + math.random() * (hi - lo)
+        _randYTarget = lo + math.random() * (hi - lo)
     end
-    local function curHeight() return _randY and _curRandHeight or _height end
+    local function curHeight() return _randY and _randYCur or _height end
 
     local function targetHrp()
         local c=_target and _target.Character
@@ -966,36 +971,42 @@ local fakeOrbit = (function()
     local function start()
         if _on then return end
         _on=true; _angle=0; _savedCF=nil
-        if _randY then rollRandHeight() end
+        if _randY then _randYTimer=0; rollRandTarget(); _randYCur=_randYTarget end
         _hbConn=RunService.Heartbeat:Connect(function(dt)
             if not _on then return end
             local thrp=targetHrp()
             local c=lplr.Character; local hrp=c and c:FindFirstChild("HumanoidRootPart")
             if not thrp or not hrp then return end
-            local prevAngle=_angle
             _angle=(_angle + _speed*dt) % 360
-            -- wrapped past 360 => completed a lap => roll a fresh random height
-            if _randY and _angle < prevAngle then rollRandHeight() end
+            -- randomize-Y: re-pick a target height often, ease toward it smoothly
+            if _randY then
+                _randYTimer = _randYTimer + dt
+                if _randYTimer >= _randYInterval then
+                    _randYTimer = _randYTimer - _randYInterval
+                    rollRandTarget()
+                end
+                _randYCur = _randYCur + (_randYTarget - _randYCur) * math.min(1, dt * 6)
+            end
             local cf=orbitCF(thrp, hrp)
-            -- our "home" pose that stop() tps us back to. Captured once at the real
-            -- body (before the glue drags hrp toward the target). In desync we also
-            -- integrate our movement input so it follows where we walk on screen.
-            if not _savedCF then _savedCF = hrp.CFrame end
             if _desync then
                 local hum = c:FindFirstChildOfClass("Humanoid")
                 local moving = hum and hum.MoveDirection.Magnitude > 0
-                if moving then
-                    _savedCF = _savedCF + hum.MoveDirection * hum.WalkSpeed * dt
-                end
+                -- capture our REAL local pose + velocity this frame. Physics has
+                -- already run, so the character moved/turned naturally; the
+                -- render-step restores these, so locally you walk, turn and
+                -- animate completely normally while the server sees the orbit.
+                _savedCF = hrp.CFrame
+                _savedLV = hrp.AssemblyLinearVelocity
+                _savedAV = hrp.AssemblyAngularVelocity
                 pcall(function() hrp:SetNetworkOwner(lplr) end)
                 pcall(function() thrp:SetNetworkOwner(lplr) end)
                 pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
                 hrp.CFrame = cf
-                -- standing still locally lets the assembly sleep and stop
-                -- replicating the orbit; a tiny spin keeps it awake (no fling).
-                if not moving then hrp.AssemblyAngularVelocity = KEEP_AWAKE_AV end
+                -- only nudge when idle; moving already keeps the body awake.
+                if not moving then hrp.AssemblyLinearVelocity = KEEP_AWAKE_LV end
                 getgenv()._F_DESYNC_SENT_CF = cf
             else
+                if not _savedCF then _savedCF = hrp.CFrame end  -- physical: home = enable-time pose
                 -- physical: connection-glue onto the orbit point and kill drift
                 pcall(function() hrp:SetNetworkOwner(lplr) end)
                 pcall(function() thrp:SetNetworkOwner(lplr) end)
@@ -1010,7 +1021,13 @@ local fakeOrbit = (function()
         RunService:BindToRenderStep(RESTORE, Enum.RenderPriority.First.Value, function()
             if not _on or not _desync then return end
             local c=lplr.Character; local h=c and c:FindFirstChild("HumanoidRootPart")
-            if h and _savedCF then h.CFrame=_savedCF end
+            if h and _savedCF then
+                h.CFrame=_savedCF
+                -- undo the keep-awake nudge locally so it never leaks into your
+                -- own physics (otherwise you'd slowly float / drift on screen).
+                if _savedLV then h.AssemblyLinearVelocity  = _savedLV end
+                if _savedAV then h.AssemblyAngularVelocity = _savedAV end
+            end
         end)
         _bindActive=true
     end
@@ -1023,8 +1040,8 @@ local fakeOrbit = (function()
         setSpeed  = function(n) _speed =math.clamp(tonumber(n) or 720, 0, 3600) end,
         setHeight = function(n) _height=math.clamp(tonumber(n) or 0, -1000, 1000) end,
         setFace   = function(v) _face = v and true or false end,
-        -- randomize height: re-rolls a new height within [min,max] each lap
-        setRandY    = function(v) _randY = v and true or false; if _randY then rollRandHeight() end end,
+        -- randomize height: eases between random heights within [min,max]
+        setRandY    = function(v) _randY = v and true or false; if _randY then _randYTimer=0; rollRandTarget(); _randYCur=_randYTarget end end,
         setRandYMin = function(n) _randYMin = math.clamp(tonumber(n) or -5, -1000, 1000) end,
         setRandYMax = function(n) _randYMax = math.clamp(tonumber(n) or 10, -1000, 1000) end,
         setDesync = function(v)
@@ -1033,6 +1050,9 @@ local fakeOrbit = (function()
             _desync = v
         end,
         isOn=function() return _on end,
+        -- true only while the orbit is driving a DESYNC spoof -- the server-pos
+        -- visualizer reads this to show the live orbit point (no ping lookback).
+        isDesyncActive=function() return _on and _desync end,
     }
 end)()
 
