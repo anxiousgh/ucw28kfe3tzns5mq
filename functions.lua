@@ -920,15 +920,18 @@ local fakeOrbit = (function()
             pcall(function() if sethiddenproperty then sethiddenproperty(h,"PhysicsRepRootPart",h) end end)
             pcall(function() h:SetNetworkOwner(lplr) end)
         end
-        -- No anchor: just zero our velocity and tp us back to our home pose, both
-        -- desynced and physical. Re-assert for a short window so it sticks past the
-        -- server's stale orbit position / any residual fling.
+        -- No anchor: zero our velocity and tp us back to our home pose, both
+        -- desynced and physical. Short window just to kill the fling / snap-back --
+        -- and we LET GO the instant we get movement input so we never trap you
+        -- (the long hold was why it "only turned off when you moved").
         if back then
             task.spawn(function()
-                local deadline=tick()+1.0
+                local deadline=tick()+0.25
                 while tick()<deadline do
                     if _on then break end   -- re-enabled mid-restore: stop early
                     local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
+                    local hum=cc and cc:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.MoveDirection.Magnitude > 0 then break end  -- you want to move: free you now
                     if hh then
                         hh.AssemblyLinearVelocity=Vector3.zero
                         hh.AssemblyAngularVelocity=Vector3.zero
