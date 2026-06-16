@@ -924,19 +924,26 @@ local fakeOrbit = (function()
             if desyncWas and back then pcall(function() h.CFrame=back end) end
         end
         _savedCF=nil
-        -- The server still thinks we're at the orbit point (that's what we were
-        -- replicating). Once the render-restore stops, it would snap us back onto
-        -- the target. Hold us on our real body for a moment so the true position
-        -- replicates and wins.
+        -- The server still thinks we're at the orbit point. Just setting our CFrame
+        -- barely replicates while we're standing still (only moving replicates the
+        -- forced position, which is why it "only worked when moving"). Briefly
+        -- ANCHOR us on our real body -- an anchored part replicates its CFrame
+        -- authoritatively, so the server accepts it whether we move or not.
         if desyncWas and back then
             task.spawn(function()
-                local deadline=tick()+0.4
+                local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
+                if not hh then return end
+                pcall(function()
+                    hh.CFrame=back
+                    hh.AssemblyLinearVelocity=Vector3.zero
+                    hh.Anchored=true
+                end)
+                local deadline=tick()+0.3
                 while tick()<deadline do
-                    if _on then break end   -- re-enabled mid-hold: bail
-                    local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
-                    if hh then hh.CFrame=back; hh.AssemblyLinearVelocity=Vector3.zero end
+                    if _on then break end   -- re-enabled mid-hold: stop early
                     RunService.Heartbeat:Wait()
                 end
+                if hh and hh.Parent then pcall(function() hh.Anchored=false end) end
             end)
         end
     end
