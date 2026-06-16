@@ -244,10 +244,18 @@ regToggle(Movement, "FakeOrbitFace", "Always face target", true,
     function(v) hook.fakeOrbit.setFace(v) end)
 regSlider(Movement, "FakeOrbitRadius", "Orbit radius", " studs", { min = 0, max = 100, default = 8 },
     function(v) hook.fakeOrbit.setRadius(v) end)
-regSlider(Movement, "FakeOrbitSpeed", "Orbit speed", " deg/s", { min = 0, max = 1080, default = 180 },
+regSlider(Movement, "FakeOrbitSpeed", "Orbit speed", " deg/s", { min = 0, max = 3600, default = 720 },
     function(v) hook.fakeOrbit.setSpeed(v) end)
 regSlider(Movement, "FakeOrbitHeight", "Orbit height", " studs", { min = -50, max = 50, default = 0 },
     function(v) hook.fakeOrbit.setHeight(v) end)
+-- randomize height: re-rolls a new height within [min,max] each full lap so you
+-- bob up and down unpredictably (overrides the fixed "Orbit height" above).
+regToggle(Movement, "FakeOrbitRandY", "Randomize height", false,
+    function(v) hook.fakeOrbit.setRandY(v) end)
+regSlider(Movement, "FakeOrbitRandYMin", "Random height min", " studs", { min = -50, max = 50, default = -5 },
+    function(v) hook.fakeOrbit.setRandYMin(v) end)
+regSlider(Movement, "FakeOrbitRandYMax", "Random height max", " studs", { min = -50, max = 50, default = 10 },
+    function(v) hook.fakeOrbit.setRandYMax(v) end)
 
 -- ---------- CSGO HVH movement ----------
 Movement:NewSection("CSGO HVH movement")

@@ -5,7 +5,7 @@
 
 
 --  VERSION  (bumped on every push so you can verify which build
-local SCRIPT_VERSION = "v1.39.1"
+local SCRIPT_VERSION = "v1.40.0"
 
 --// services
 local HttpService         = game:GetService("HttpService")
@@ -882,7 +882,7 @@ local fakeOrbit = (function()
     local _on=false
     local _target=nil
     local _radius=8
-    local _speed=180      -- degrees / second
+    local _speed=720      -- degrees / second
     local _height=0
     local _face=true
     local _desync=false
@@ -891,6 +891,22 @@ local fakeOrbit = (function()
     local _bindActive=false
     local _savedCF=nil    -- our real local CFrame (desync mode restores to this)
     local RESTORE="wh_fakeorbit_restore"
+    -- randomize-Y: re-roll a new orbit height (within [min,max]) on every full
+    -- lap so you bob up and down unpredictably instead of holding a fixed height.
+    local _randY=false
+    local _randYMin=-5
+    local _randYMax=10
+    local _curRandHeight=0   -- this lap's chosen height (rolled on each wrap)
+    -- keep-awake: a tiny ANGULAR velocity applied while you stand still so the
+    -- engine doesn't put your assembly to sleep. A sleeping body stops
+    -- replicating, which is why the desync orbit "only moved when you walked".
+    -- Angular (not linear) so it can never fling whoever you're orbiting.
+    local KEEP_AWAKE_AV = Vector3.new(0, 10, 0)
+    local function rollRandHeight()
+        local lo, hi = math.min(_randYMin, _randYMax), math.max(_randYMin, _randYMax)
+        _curRandHeight = lo + math.random() * (hi - lo)
+    end
+    local function curHeight() return _randY and _curRandHeight or _height end
 
     local function targetHrp()
         local c=_target and _target.Character
@@ -899,7 +915,7 @@ local fakeOrbit = (function()
 
     local function orbitCF(thrp, hrp)
         local rad=math.rad(_angle)
-        local pos=thrp.Position + Vector3.new(math.cos(rad)*_radius, _height, math.sin(rad)*_radius)
+        local pos=thrp.Position + Vector3.new(math.cos(rad)*_radius, curHeight(), math.sin(rad)*_radius)
         if _face then
             return CFrame.lookAt(pos, thrp.Position)
         end
@@ -921,23 +937,27 @@ local fakeOrbit = (function()
             pcall(function() h:SetNetworkOwner(lplr) end)
         end
         -- No anchor: zero our velocity and tp us back to our home pose, both
-        -- desynced and physical. Short window just to kill the fling / snap-back --
-        -- and we LET GO the instant we get movement input so we never trap you
-        -- (the long hold was why it "only turned off when you moved").
+        -- desynced and physical. We re-assert "home" for a short window to beat
+        -- the server snap-back that would otherwise dump us on the target. We do
+        -- NOT bail on movement (that was the bug: turning off while walking left
+        -- you glued on the target) -- instead we fold your movement input into
+        -- "home" so you can walk away immediately AND never get left on them.
         if back then
             task.spawn(function()
-                local deadline=tick()+0.25
+                local deadline=tick()+0.4
                 while tick()<deadline do
                     if _on then break end   -- re-enabled mid-restore: stop early
+                    local dt=RunService.Heartbeat:Wait()
                     local cc=lplr.Character; local hh=cc and cc:FindFirstChild("HumanoidRootPart")
                     local hum=cc and cc:FindFirstChildOfClass("Humanoid")
-                    if hum and hum.MoveDirection.Magnitude > 0 then break end  -- you want to move: free you now
                     if hh then
+                        if hum and hum.MoveDirection.Magnitude > 0 then
+                            back = back + hum.MoveDirection * hum.WalkSpeed * dt
+                        end
+                        hh.CFrame=back
                         hh.AssemblyLinearVelocity=Vector3.zero
                         hh.AssemblyAngularVelocity=Vector3.zero
-                        hh.CFrame=back
                     end
-                    RunService.Heartbeat:Wait()
                 end
             end)
         end
@@ -946,12 +966,16 @@ local fakeOrbit = (function()
     local function start()
         if _on then return end
         _on=true; _angle=0; _savedCF=nil
+        if _randY then rollRandHeight() end
         _hbConn=RunService.Heartbeat:Connect(function(dt)
             if not _on then return end
             local thrp=targetHrp()
             local c=lplr.Character; local hrp=c and c:FindFirstChild("HumanoidRootPart")
             if not thrp or not hrp then return end
+            local prevAngle=_angle
             _angle=(_angle + _speed*dt) % 360
+            -- wrapped past 360 => completed a lap => roll a fresh random height
+            if _randY and _angle < prevAngle then rollRandHeight() end
             local cf=orbitCF(thrp, hrp)
             -- our "home" pose that stop() tps us back to. Captured once at the real
             -- body (before the glue drags hrp toward the target). In desync we also
@@ -959,13 +983,17 @@ local fakeOrbit = (function()
             if not _savedCF then _savedCF = hrp.CFrame end
             if _desync then
                 local hum = c:FindFirstChildOfClass("Humanoid")
-                if hum and hum.MoveDirection.Magnitude > 0 then
+                local moving = hum and hum.MoveDirection.Magnitude > 0
+                if moving then
                     _savedCF = _savedCF + hum.MoveDirection * hum.WalkSpeed * dt
                 end
                 pcall(function() hrp:SetNetworkOwner(lplr) end)
                 pcall(function() thrp:SetNetworkOwner(lplr) end)
                 pcall(function() if sethiddenproperty then sethiddenproperty(hrp,"PhysicsRepRootPart",thrp) end end)
                 hrp.CFrame = cf
+                -- standing still locally lets the assembly sleep and stop
+                -- replicating the orbit; a tiny spin keeps it awake (no fling).
+                if not moving then hrp.AssemblyAngularVelocity = KEEP_AWAKE_AV end
                 getgenv()._F_DESYNC_SENT_CF = cf
             else
                 -- physical: connection-glue onto the orbit point and kill drift
@@ -992,9 +1020,13 @@ local fakeOrbit = (function()
         setTarget = function(p) _target = (typeof(p)=="Instance") and p or nil end,
         getTarget = function() return _target end,
         setRadius = function(n) _radius=math.clamp(tonumber(n) or 8, 0, 1000) end,
-        setSpeed  = function(n) _speed =math.clamp(tonumber(n) or 180, 0, 3600) end,
+        setSpeed  = function(n) _speed =math.clamp(tonumber(n) or 720, 0, 3600) end,
         setHeight = function(n) _height=math.clamp(tonumber(n) or 0, -1000, 1000) end,
         setFace   = function(v) _face = v and true or false end,
+        -- randomize height: re-rolls a new height within [min,max] each lap
+        setRandY    = function(v) _randY = v and true or false; if _randY then rollRandHeight() end end,
+        setRandYMin = function(n) _randYMin = math.clamp(tonumber(n) or -5, -1000, 1000) end,
+        setRandYMax = function(n) _randYMax = math.clamp(tonumber(n) or 10, -1000, 1000) end,
         setDesync = function(v)
             v = v and true or false
             if _on and _desync and not v then getgenv()._F_DESYNC_SENT_CF=nil end  -- leaving desync mode
@@ -3483,7 +3515,13 @@ F.desync = (function()
                 local hrp = c and c:FindFirstChild("HumanoidRootPart")
                 if not hrp or not realCF then return end
                 pcall(function()
-                    hrp.CFrame = realCF
+                    -- Velocity mode never spoofs the CFrame (only the velocity
+                    -- vector), so re-asserting it here is pointless -- and it
+                    -- actively FOUGHT the fakepos orbit, which DOES drive the
+                    -- CFrame. That fight froze the orbit whenever a velocity
+                    -- desync was enabled. Restore only the velocity for that mode
+                    -- and leave the CFrame to whoever owns it (the orbit).
+                    if mode ~= "velocity" then hrp.CFrame = realCF end
                     if realLV then hrp.AssemblyLinearVelocity  = realLV end
                     if realAV then hrp.AssemblyAngularVelocity = realAV end
                 end)
